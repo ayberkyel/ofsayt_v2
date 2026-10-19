@@ -1,7 +1,11 @@
-# PyTorch'u GPU (CUDA) ile ayrıca kurun, bu dosyadan ÖNCE:
+# Streamlit Cloud CPU'da çalışır: torch CPU paketinden kurulur (CUDA paketi çok büyük).
+# Yerelde GPU için PyTorch'u ayrıca, bu dosyadan ÖNCE kurun:
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
 ultralytics>=8.3
-opencv-python>=4.9
+opencv-python-headless>=4.9
 numpy
 pandas
 scikit-learn
