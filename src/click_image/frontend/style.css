@@ -1,0 +1,15 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Görsel ASLA çerçeveden taşmaz: genişlik en fazla çerçeve kadar, yükseklik orantılı.
+   Ekran ölçekleme (DPI) veya tarayıcı yakınlaştırması ne olursa olsun tüm kare görünür. */
+#image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  user-select: none;
+  cursor: crosshair;
+}

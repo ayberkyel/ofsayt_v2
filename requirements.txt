@@ -1,0 +1,11 @@
+# PyTorch'u GPU (CUDA) ile ayrıca kurun, bu dosyadan ÖNCE:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+ultralytics>=8.3
+opencv-python>=4.9
+numpy
+pandas
+scikit-learn
+matplotlib
+pillow
+streamlit>=1.40
+streamlit-image-coordinates>=0.1.9

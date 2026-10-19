@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Veri seti ve yüklemeler (büyük + yayın görüntüleri telif hakkına tabi; GitHub'a konmaz)
+data/dataset/
+data/_extract/
+data/uploads/
+
+# Eğitim çıktıları ve otomatik indirilen ağırlıklar
+runs/
+weights/
+yolov8s.pt
+yolo*.pt
+!models/best.pt
+
+# Etiket kontrol görselleri (maç görüntülerinden kırpılmış)
+results/relabel_review/
+
+# Yerel ayarlar
+.claude/
+.vscode/
+.streamlit/secrets.toml
