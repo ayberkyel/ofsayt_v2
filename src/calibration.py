@@ -166,7 +166,7 @@ def player_width_m(H, boxes, q=75):
     return float(np.percentile(w, q))
 
 
-def draw_template(img, H, color=(0, 255, 255), thickness=2):
+def draw_template(img, H, color=(182, 126, 255), thickness=2):   # bubblegum pink (BGR)
     """Saha şablonunu görüntüye çizer. Çizgiler gerçek saha çizgileriyle örtüşüyorsa kalibrasyon doğrudur."""
     out = img.copy()
     for line in template_lines():

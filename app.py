@@ -33,6 +33,7 @@ from src.detector import Detection, PlayerDetector, assign_teams
 from src.drawing import draw_detections, draw_point, draw_result, keypoint_guide, minimap
 from src.offside import OFFSIDE, ONSIDE, BORDERLINE
 from src.pass_detect import detect_pass
+from src import ui
 from src.calibration import image_to_pitch
 from src.pipeline import decide, offpitch_ids
 from src.pitch import KEYPOINTS, PITCH_LENGTH, is_size_dependent, ordered_keypoints
@@ -44,52 +45,9 @@ SCENES = ROOT / "scenes"
 TEAM_NAMES = {0: "Takım A", 1: "Takım B"}
 STEPS = ["1 · Kare seçimi", "2 · Top konumu", "3 · Oyuncu tespiti", "4 · Kalibrasyon", "5 · Sonuç"]
 
-st.set_page_config(page_title="Ofsayt Tespit Sistemi", page_icon="⚽", layout="wide")
-
-# Renk paleti (temel tema .streamlit/config.toml içinde; burada yalnızca düğme ve başlık süslemeleri)
-MARSHMALLOW, VIOLET, VIOLET_2, PINK, PINK_LIGHT = "#FDF8F3", "#4A2A7A", "#6B3FA0", "#FF7EB6", "#FFD3E6"
-st.markdown(f"""
-<style>
-/* Başlıklar */
-[data-testid="stMain"] h1, [data-testid="stMain"] h2, [data-testid="stMain"] h3 {{
-  color: {VIOLET} !important; letter-spacing: -0.01em;
-}}
-[data-testid="stSidebar"] h1 {{ color: {MARSHMALLOW} !important; }}
-[data-testid="stSidebar"] h1::after {{
-  content: ""; display: block; width: 3rem; height: 4px; border-radius: 4px; margin-top: .4rem; background: {PINK};
-}}
-[data-testid="stMain"] h2 {{
-  border-bottom: 3px solid {PINK}; padding-bottom: .35rem; display: inline-block;
-}}
-/* Ana düğmeler: violet -> pink geçişli */
-[data-testid="stBaseButton-primary"] {{
-  background: linear-gradient(135deg, {VIOLET} 0%, {VIOLET_2} 45%, {PINK} 100%) !important;
-  color: {MARSHMALLOW} !important; border: none !important; font-weight: 600 !important;
-  box-shadow: 0 4px 14px rgba(74, 42, 122, .25); transition: transform .12s ease, box-shadow .12s ease;
-}}
-[data-testid="stBaseButton-primary"]:hover {{
-  transform: translateY(-1px); box-shadow: 0 6px 18px rgba(255, 126, 182, .45);
-}}
-/* İkincil düğmeler: marshmallow zemin, violet çerçeve, hover'da pembe */
-[data-testid="stBaseButton-secondary"] {{
-  background: {MARSHMALLOW} !important; color: {VIOLET} !important;
-  border: 1.5px solid {VIOLET} !important; font-weight: 500 !important;
-  transition: background .12s ease, color .12s ease, border-color .12s ease;
-}}
-[data-testid="stBaseButton-secondary"]:hover {{
-  background: {PINK_LIGHT} !important; border-color: {PINK} !important; color: {VIOLET} !important;
-}}
-/* Yan menüdeki düğme (Her şeyi sıfırla) */
-[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {{
-  background: transparent !important; color: {MARSHMALLOW} !important; border-color: {PINK} !important;
-}}
-[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:hover {{
-  background: {PINK} !important; color: {VIOLET} !important;
-}}
-/* Çerçeveli kutular (ör. otomatik pas anı) */
-[data-testid="stVerticalBlockBorderWrapper"] {{ border-color: #E4D6F0 !important; }}
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="Ofsayt Tespit Sistemi", page_icon=ui.logo_image(), layout="wide")
+# Tema renkleri .streamlit/config.toml'da; düğme, başlık, kart ve animasyon stilleri src/ui.py'de
+st.markdown(ui.CSS, unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------------------------
@@ -324,21 +282,21 @@ init_state()
 s = ss()
 
 with st.sidebar:
-    st.title("⚽ Ofsayt Tespit")
+    st.markdown(ui.sidebar_brand(), unsafe_allow_html=True)
     step = st.radio("Adım", STEPS, key="step")
     st.divider()
     disp_w = st.slider("Görüntü genişliği (ekran)", 600, 1600, 1000, 50,
                        help="Görselin sağ kenarı kesiliyorsa küçültün; tıklanamayan bölge kalmamalı.")
     weights = st.text_input("Model ağırlıkları", default_weights())
-    st.caption("Durum")
-    st.write(("✅" if s.frame is not None else "⬜") + " Kare",
-             ("✅" if s.ball else "⬜") + " Top",
-             ("✅" if s.dets else "⬜") + " Tespit",
-             ("✅" if len(s.calib) >= 4 else "⬜") + f" Kalibrasyon ({len(s.calib)})")
     if st.button("🔄 Her şeyi sıfırla", width="stretch"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()
+
+# Üstte adım göstergesi: tamamlanan adımlar pembe tikli, şu anki adım mor
+st.markdown(ui.stepper(["Kare", "Top", "Oyuncular", "Kalibrasyon", "Karar"], STEPS.index(step),
+                       [s.frame is not None, bool(s.ball), bool(s.dets), len(s.calib) >= 4, False]),
+            unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------------
 # ADIM 1 — Kare seçimi
@@ -394,6 +352,8 @@ if step == STEPS[0]:
             ball_sz = a2.select_slider("Top için model boyutu", [960, 1280], value=1280,
                                        help="Top küçük bir nesnedir; 1280 daha iyi bulur ama daha yavaştır.")
             if a3.button("🤖 Pas anını bul", type="primary", width="stretch"):
+                anim = st.empty()
+                anim.markdown(ui.busy("Top izleniyor, pas anı aranıyor..."), unsafe_allow_html=True)
                 bar = st.progress(0.0, text="Video taranıyor (top + oyuncular)...")
                 t0 = time.time()
                 try:
@@ -402,7 +362,7 @@ if step == STEPS[0]:
                 except Exception as e:      # video okunamazsa / model inemezse arayüz çökmesin
                     res = None
                     st.error(f"Otomatik tespit başarısız: {e}")
-                bar.empty()
+                bar.empty(); anim.empty()
                 if res is not None:
                     s.pass_res, s.pass_time = res, time.time() - t0
                     if res.best is not None:
@@ -463,7 +423,7 @@ if step == STEPS[0]:
         st.info("İpucu: Pasın verildiği İLK kareyi seçin (topun ayaktan ayrıldığı an). "
                 "25 FPS'de bir kare 40 ms'dir ve bu sürede oyuncular 20-30 cm yer değiştirebilir.")
     else:
-        st.info("Başlamak için bir video veya görsel yükleyin.")
+        st.markdown(ui.welcome(), unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------------
 # Diğer adımlar bir kare gerektirir
@@ -505,9 +465,12 @@ elif step == STEPS[2]:
         if not Path(weights).exists():
             st.error(f"Model bulunamadı: {weights}")
         else:
+            anim = st.empty()
+            anim.markdown(ui.busy("Oyuncular aranıyor, takımlar ayrılıyor..."), unsafe_allow_html=True)
             det = load_detector(weights)
             t0 = time.time()
             s.dets = assign_teams(s.frame, det.detect(s.frame, conf=conf, imgsz=imgsz))
+            anim.empty()
             s.excluded_ids = []
             s.editor_ver += 1
             st.toast(f"{len(s.dets)} kişi tespit edildi ({time.time()-t0:.2f} s)")
@@ -645,7 +608,7 @@ elif step == STEPS[3]:
         if H is not None and show_tpl:
             im = draw_template(im, H @ np.linalg.inv(A))
         for i, c in enumerate(s.calib):
-            draw_point(im, apply_affine(A, c["px"]), (0, 255, 0), 8, str(i + 1))
+            draw_point(im, apply_affine(A, c["px"]), (182, 126, 255), 8, str(i + 1))
         return im
 
     pt = zoomable(s.frame, "calib", disp_w, overlay=calib_overlay, default_on=True)
@@ -772,9 +735,8 @@ elif step == STEPS[4]:
     except Exception as e:  # noqa
         st.error(f"Hesaplanamadı: {e}"); st.stop()
 
-    color = {OFFSIDE: "red", ONSIDE: "green", BORDERLINE: "orange"}[res.decision]
-    st.markdown(f"<h1 style='color:{color};margin:0'>{res.decision}</h1>", unsafe_allow_html=True)
-    st.write(res.reason)
+    st.markdown(ui.verdict_card(res.decision, res.diff_m, float(s.get("band", 0.5)), res.reason,
+                                res.line_source), unsafe_allow_html=True)
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Fark (hücumcu − çizgi)", f"{res.diff_m:+.2f} m")
     m2.metric("Ofsayt çizgisi x", f"{res.line_x:.2f} m", res.line_source, delta_color="off")

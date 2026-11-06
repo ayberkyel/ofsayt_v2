@@ -81,7 +81,10 @@ def main():
     # Adım 5: sonuç
     at.sidebar.radio[0].set_value("5 · Sonuç").run()
     assert not at.exception, at.exception
-    print("  sonuç sayfası:", [m.value for m in at.metric], [md.value[:60] for md in at.markdown][:2])
+    verdict = [md.value for md in at.markdown if "class=\"ot-verdict\"" in md.value]
+    assert verdict, "karar kartı gösterilmeli"
+    word = next(w for w in ("OFSAYT DEĞİL", "OFSAYT", "SINIRDA") if w in verdict[0])
+    print("  sonuç sayfası:", [m.value for m in at.metric], "karar kartı:", word)
     for st_err in at.error:
         print("  HATA:", st_err.value)
     print("Arayüz duman testi geçti.")

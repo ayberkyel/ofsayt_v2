@@ -8,7 +8,15 @@ from .pitch import HALF_X, PITCH_LENGTH, PITCH_WIDTH, template_lines
 # BGR renkler
 TEAM_COLORS = {0: (255, 140, 0), 1: (40, 40, 230), None: (200, 200, 200)}
 ROLE_COLORS = {"goalkeeper": (0, 215, 255), "referee": (30, 30, 30)}
-DECISION_COLORS = {"OFSAYT": (0, 0, 220), "OFSAYT DEĞİL": (0, 170, 0), "SINIRDA": (0, 165, 255)}
+# Karar renkleri (arayüzdeki karar kartıyla aynı: src/ui.py VERDICT)
+DECISION_COLORS = {"OFSAYT": (111, 67, 232), "OFSAYT DEĞİL": (107, 163, 47), "SINIRDA": (49, 165, 242)}
+# Arayüz paleti (BGR): bubblegum pink, galactic violet, açık lila, marshmallow beyazı
+PINK = (182, 126, 255)
+VIOLET = (122, 42, 74)
+VIOLET_2 = (160, 63, 107)
+LILAC = (245, 167, 201)
+PINK_LIGHT = (230, 211, 255)
+MARSHMALLOW = (243, 248, 253)
 # cv2.putText Türkçe karakter çizemediği için görüntü üzerindeki yazılar ASCII
 DECISION_ASCII = {"OFSAYT": "OFSAYT", "OFSAYT DEĞİL": "OFSAYT DEGIL", "SINIRDA": "SINIRDA"}
 
@@ -39,10 +47,10 @@ def draw_detections(img, dets, excluded=(), highlight=None, scale=1.0):
 
 def draw_point(img, pt, color=(255, 255, 255), r=8, label=None):
     x, y = int(pt[0]), int(pt[1])
-    cv2.circle(img, (x, y), r, (0, 0, 0), 3)
+    cv2.circle(img, (x, y), r, VIOLET, 4)
     cv2.circle(img, (x, y), r, color, 2)
     if label:
-        cv2.putText(img, label, (x + r + 3, y - r), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.putText(img, label, (x + r + 3, y - r), cv2.FONT_HERSHEY_SIMPLEX, 0.6, VIOLET, 4, cv2.LINE_AA)
         cv2.putText(img, label, (x + r + 3, y - r), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
     return img
 
@@ -60,18 +68,25 @@ def draw_pitch_x_line(img, H, x, color, thickness=2):
 
 def draw_result(img, dets, H, result, attacker_id, defender_ids, ball_px=None, excluded=()):
     out = draw_detections(img, dets, excluded, highlight=attacker_id)
-    # Ofsayt çizgisi (kırmızı) ve hücumcu çizgisi (mavi) — TV'deki VAR çizimine benzer
-    draw_pitch_x_line(out, H, result.line_x, (0, 0, 255), 3)
-    draw_pitch_x_line(out, H, result.attacker_x, (255, 120, 0), 2)
+    # Ofsayt çizgisi (pembe, mor gölgeli) ve hücumcu çizgisi (açık lila) — TV'deki VAR çizimine benzer
+    draw_pitch_x_line(out, H, result.line_x, VIOLET, 6)
+    draw_pitch_x_line(out, H, result.line_x, PINK, 3)
+    draw_pitch_x_line(out, H, result.attacker_x, VIOLET, 4)
+    draw_pitch_x_line(out, H, result.attacker_x, LILAC, 2)
     if ball_px is not None:
-        draw_point(out, ball_px, (255, 255, 255), 7, "top")
+        draw_point(out, ball_px, MARSHMALLOW, 7, "top")
     for d in dets:
         if d.id in defender_ids:
-            cv2.circle(out, tuple(map(int, d.foot)), 9, (0, 0, 255), 2)
+            cv2.circle(out, tuple(map(int, d.foot)), 10, VIOLET, 4)
+            cv2.circle(out, tuple(map(int, d.foot)), 10, PINK, 2)
+    # Karar etiketi: mor zemin, solda karar renginde şerit
     color = DECISION_COLORS[result.decision]
     text = f"{DECISION_ASCII[result.decision]}  ({result.diff_m:+.2f} m)"
-    cv2.rectangle(out, (10, 10), (20 + 22 * len(text), 60), color, -1)
-    cv2.putText(out, text, (20, 47), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.1, 3)
+    cv2.rectangle(out, (10, 10), (44 + tw, 30 + th + 12), VIOLET, -1)
+    cv2.rectangle(out, (10, 10), (20, 30 + th + 12), color, -1)
+    cv2.rectangle(out, (10, 30 + th + 8), (44 + tw, 30 + th + 12), PINK, -1)
+    cv2.putText(out, text, (30, 22 + th), cv2.FONT_HERSHEY_SIMPLEX, 1.1, MARSHMALLOW, 3, cv2.LINE_AA)
     return out
 
 
@@ -84,20 +99,20 @@ def keypoint_guide(side, target=None, done=(), scale=6, margin=14):
     x_lo, x_hi = (HALF_X - 6, PITCH_LENGTH) if side == "SAĞ" else (0.0, HALF_X + 6)
     W = int((x_hi - x_lo) * scale) + 2 * margin
     Hh = int(PITCH_WIDTH * scale) + 2 * margin
-    img = np.full((Hh, W, 3), (60, 140, 60), np.uint8)
+    img = np.full((Hh, W, 3), VIOLET, np.uint8)
 
     def to_px(p):
         return int(margin + (p[0] - x_lo) * scale), int(margin + (PITCH_WIDTH - p[1]) * scale)
 
     for line in template_lines():
-        cv2.polylines(img, [np.int32([to_px(p) for p in line])], False, (235, 235, 235), 1, cv2.LINE_AA)
+        cv2.polylines(img, [np.int32([to_px(p) for p in line])], False, MARSHMALLOW, 1, cv2.LINE_AA)
     for n in done:
         if n in KEYPOINTS:
-            cv2.circle(img, to_px(KEYPOINTS[n]), 5, (0, 220, 0), -1)
+            cv2.circle(img, to_px(KEYPOINTS[n]), 5, PINK_LIGHT, -1)
     if target in KEYPOINTS:
         c = to_px(KEYPOINTS[target])
-        cv2.circle(img, c, 11, (0, 0, 255), 3)
-        cv2.circle(img, c, 3, (0, 0, 255), -1)
+        cv2.circle(img, c, 11, PINK, 3)
+        cv2.circle(img, c, 3, PINK, -1)
     cv2.putText(img, "kamera tarafi (yakin)", (margin, Hh - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
     return img
 
@@ -106,19 +121,24 @@ def minimap(dets, H, excluded=(), result=None, ball_px=None, attacker_id=None, s
     """Kuşbakışı saha: oyuncuların homography ile hesaplanan gerçek konumları."""
     W = int(PITCH_LENGTH * scale) + 2 * margin
     Hh = int(PITCH_WIDTH * scale) + 2 * margin
-    img = np.full((Hh, W, 3), (60, 140, 60), np.uint8)
+    img = np.full((Hh, W, 3), VIOLET, np.uint8)
+    # hafif çim şeritleri (mor tonlarında)
+    for k in range(0, int(PITCH_LENGTH), 10):
+        if (k // 10) % 2 == 0:
+            x0 = int(margin + k * scale)
+            cv2.rectangle(img, (x0, margin), (min(W - margin, x0 + int(10 * scale)), Hh - margin), VIOLET_2, -1)
 
     def to_px(p):
         # y = 0 (yakın yan çizgi) altta görünsün diye y eksenini ters çeviriyoruz
         return int(margin + p[0] * scale), int(margin + (PITCH_WIDTH - p[1]) * scale)
 
     for line in template_lines():
-        cv2.polylines(img, [np.int32([to_px(p) for p in line])], False, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.polylines(img, [np.int32([to_px(p) for p in line])], False, MARSHMALLOW, 2, cv2.LINE_AA)
     if result is not None:
         lx = to_px((result.line_x, 0))[0]
-        cv2.line(img, (lx, margin), (lx, Hh - margin), (0, 0, 255), 2)
+        cv2.line(img, (lx, margin), (lx, Hh - margin), PINK, 3)
         ax = to_px((result.attacker_x, 0))[0]
-        cv2.line(img, (ax, margin), (ax, Hh - margin), (255, 120, 0), 1)
+        cv2.line(img, (ax, margin), (ax, Hh - margin), LILAC, 2)
     for d in dets:
         if d.id in excluded:
             continue
@@ -131,6 +151,6 @@ def minimap(dets, H, excluded=(), result=None, ball_px=None, attacker_id=None, s
         cv2.putText(img, str(d.id), (c[0] + 8, c[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
     if ball_px is not None:
         b = image_to_pitch([ball_px], H)[0]
-        cv2.circle(img, to_px(b), 5, (255, 255, 255), -1)
-        cv2.circle(img, to_px(b), 5, (0, 0, 0), 1)
+        cv2.circle(img, to_px(b), 6, MARSHMALLOW, -1)
+        cv2.circle(img, to_px(b), 6, PINK, 2)
     return img
