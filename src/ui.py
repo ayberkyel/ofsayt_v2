@@ -6,6 +6,7 @@ Palet: marshmallow beyazı (zemin), galactic violet (yazı, yan menü), bubblegu
 Karar renkleri anlam taşıdığı için (ofsayt / değil / sınırda) paletle uyumlu tonlarda ayrı tutulur.
 """
 import html
+import urllib.parse
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -66,8 +67,30 @@ def logo_image(size=64):
     return img
 
 
+def _ball_texture():
+    """Dönen 3B top için yatayda kesintisiz tekrarlanan desen (200x100): beşgenler ve dikiş çizgileri."""
+    def pent(cx, cy, r=13):
+        pts = [(cx + r * np.sin(a), cy - r * np.cos(a)) for a in np.linspace(0, 2 * np.pi, 6)[:-1]]
+        return "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in pts) + " Z"
+    centers = [(50, 18), (150, 18), (0, 52), (100, 52), (200, 52), (50, 86), (150, 86)]
+    seams = [((0, 52), (50, 18)), ((50, 18), (100, 52)), ((100, 52), (150, 18)), ((150, 18), (200, 52)),
+             ((0, 52), (50, 86)), ((50, 86), (100, 52)), ((100, 52), (150, 86)), ((150, 86), (200, 52)),
+             ((50, 18), (50, -20)), ((150, 18), (150, -20)), ((50, 86), (50, 120)), ((150, 86), (150, 120))]
+    lines = "".join(f'<line x1="{a[0]}" y1="{a[1]}" x2="{b[0]}" y2="{b[1]}"/>' for a, b in seams)
+    shapes = "".join(f'<path d="{pent(x, y)}"/>' for x, y in centers)
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">'
+           f'<rect width="200" height="100" fill="{MARSHMALLOW}"/>'
+           f'<g stroke="#CDBFE0" stroke-width="2">{lines}</g><g fill="{VIOLET_DARK}">{shapes}</g></svg>')
+    return "data:image/svg+xml," + urllib.parse.quote(svg)
+
+
+def ball3d(size=110, cls=""):
+    """Saf CSS ile dönen 3B futbol topu (JS yok). Gölgelendirme sabit kalır, yalnızca desen döner."""
+    return f'<div class="ot-ball3d {cls}" style="--s:{size}px"><i></i></div>'
+
+
 def sidebar_brand():
-    return f"""<div class="ot-brand">{LOGO_SVG}<div><div class="ot-brand-title">Ofsayt Tespit</div>
+    return f"""<div class="ot-brand"><div class="ot-logo3d">{LOGO_SVG}</div><div><div class="ot-brand-title">Ofsayt Tespit</div>
 <div class="ot-brand-sub">yarı otomatik VAR</div></div></div>"""
 
 
@@ -139,6 +162,8 @@ CSS = f"""
            box-shadow: 0 10px 30px rgba(74, 42, 122, .25); }}
 .ot-hero h3 {{ color: {MARSHMALLOW} !important; margin: 0 0 .3rem; font-size: 1.5rem; border: none; }}
 .ot-hero p {{ color: {PINK_LIGHT}; margin: 0 0 1.1rem; }}
+.ot-hero-head {{ display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: .6rem; }}
+@media (max-width: 640px) {{ .ot-hero-head .ot-ball3d {{ --s: 64px !important; }} }}
 .ot-hero-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .7rem; }}
 .ot-hero-card {{ background: rgba(253, 248, 243, .1); border: 1px solid rgba(253, 248, 243, .18);
                 border-radius: 14px; padding: .8rem .9rem; }}
@@ -164,6 +189,62 @@ CSS = f"""
 .ot-gauge-wrap {{ position: relative; padding-top: 6px; }}
 .ot-gauge-labels {{ display: flex; justify-content: space-between; font-size: .75rem; color: #D9C8EA; margin-top: .35rem; }}
 
+/* ---------- 3B top (saf CSS): desen döner, ışık/gölge sabit kalır ---------- */
+.ot-ball3d {{ --s: 110px; width: var(--s); height: var(--s); border-radius: 50%; position: relative;
+             overflow: hidden; flex: none; isolation: isolate; background: {MARSHMALLOW}; }}
+.ot-ball3d i {{ position: absolute; inset: -25%; transform: rotate(-22deg);
+               background: url("{_ball_texture()}") repeat-x 0 50% / calc(var(--s) * 3) calc(var(--s) * 1.5);
+               animation: ot-ball-spin 4s linear infinite; }}
+.ot-ball3d::after {{ content: ""; position: absolute; inset: 0; border-radius: 50%; z-index: 1;
+  background: radial-gradient(circle at 32% 26%, rgba(255,255,255,.95) 0 7%, rgba(255,255,255,.35) 18%, transparent 36%),
+              radial-gradient(circle at 42% 38%, transparent 42%, rgba(46,26,79,.28) 70%, rgba(46,26,79,.75) 100%); }}
+@keyframes ot-ball-spin {{ to {{ background-position-x: calc(var(--s) * -3); }} }}
+.ot-ball3d.fast i {{ animation-duration: .9s; }}
+.ot-float {{ display: flex; flex-direction: column; align-items: center; flex: none; }}
+.ot-float .ot-ball3d {{ animation: ot-bob 3.2s ease-in-out infinite;
+                       box-shadow: 0 0 0 6px rgba(255,126,182,.18), 0 0 40px rgba(255,126,182,.45); }}
+.ot-float-shadow {{ width: 70%; height: 12px; border-radius: 50%; margin-top: 14px;
+                   background: radial-gradient(rgba(20,8,40,.55), transparent 70%); animation: ot-bob-shadow 3.2s ease-in-out infinite; }}
+@keyframes ot-bob {{ 50% {{ transform: translateY(-12px); }} }}
+@keyframes ot-bob-shadow {{ 50% {{ transform: scaleX(.75); opacity: .55; }} }}
+
+/* ---------- 3B kart eğimi ---------- */
+.ot-hero, .ot-verdict {{ transform-style: preserve-3d; transition: transform .5s cubic-bezier(.2,.8,.2,1), box-shadow .5s ease; }}
+.ot-hero:hover {{ transform: perspective(1400px) rotateX(2deg) rotateY(-2deg); box-shadow: 0 22px 44px rgba(74,42,122,.35); }}
+.ot-hero-grid {{ perspective: 800px; }}
+.ot-hero-card {{ position: relative; transform-style: preserve-3d; overflow: hidden;
+                transition: transform .45s cubic-bezier(.2,.8,.2,1), background .45s ease, box-shadow .45s ease; }}
+.ot-hero-card .ot-hero-ico {{ display: inline-block; transition: transform .45s cubic-bezier(.2,.8,.2,1); }}
+.ot-hero-card::after {{ content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.28) 48%, transparent 62%);
+  transform: translateX(-60%); transition: transform .7s ease, opacity .3s ease; }}
+.ot-hero-card:hover {{ transform: rotateX(10deg) rotateY(-12deg) translateZ(18px);
+  background: rgba(253,248,243,.17); box-shadow: 12px 16px 26px rgba(20,8,40,.35); }}
+.ot-hero-card:nth-child(even):hover {{ transform: rotateX(10deg) rotateY(12deg) translateZ(18px);
+  box-shadow: -12px 16px 26px rgba(20,8,40,.35); }}
+.ot-hero-card:hover .ot-hero-ico {{ transform: translateZ(34px) scale(1.25); }}
+.ot-hero-card:hover::after {{ opacity: 1; transform: translateX(60%); }}
+.ot-verdict {{ animation: ot-flip-in .8s cubic-bezier(.2,.9,.25,1.15) backwards; transform-origin: 50% 0; }}
+.ot-verdict:hover {{ transform: perspective(1200px) rotateX(3deg); box-shadow: 0 24px 46px rgba(46,26,79,.4); }}
+@keyframes ot-flip-in {{ from {{ transform: perspective(1200px) rotateX(-55deg); opacity: 0; }}
+                        to {{ transform: perspective(1200px) rotateX(0); opacity: 1; }} }}
+
+/* ---------- 3B logo (kalınlığı olan, ara sıra dönen kare) ---------- */
+.ot-logo3d {{ width: 48px; height: 48px; flex: none; position: relative; transform-style: preserve-3d;
+             animation: ot-logo-spin 9s cubic-bezier(.6,0,.2,1) infinite; }}
+.ot-logo3d svg {{ position: absolute; inset: 0; transform: translateZ(4px); }}
+.ot-logo3d::before, .ot-logo3d::after {{ content: ""; position: absolute; inset: 1px; border-radius: 12px; background: {VIOLET_DARK}; }}
+.ot-logo3d::before {{ transform: translateZ(0); }}
+.ot-logo3d::after {{ transform: translateZ(-4px); background: {PINK_DARK}; }}
+.ot-brand {{ perspective: 400px; }}
+.ot-brand:hover .ot-logo3d {{ animation-duration: 1.2s; }}
+@keyframes ot-logo-spin {{ 0%, 70% {{ transform: rotateX(12deg) rotateY(-22deg); }}
+                          85% {{ transform: rotateX(12deg) rotateY(338deg) translateZ(6px); }}
+                          100% {{ transform: rotateX(12deg) rotateY(338deg); }} }}
+@media (prefers-reduced-motion: reduce) {{
+  .ot-ball3d i, .ot-float .ot-ball3d, .ot-float-shadow, .ot-logo3d, .ot-verdict {{ animation: none !important; }}
+}}
+
 /* ---------- Yükleme animasyonu ---------- */
 .ot-busy {{ display: flex; align-items: center; gap: .8rem; color: {VIOLET}; font-weight: 600; margin: .3rem 0; }}
 .ot-ball {{ width: 28px; height: 28px; border-radius: 50%; position: relative;
@@ -171,6 +252,7 @@ CSS = f"""
            border: 2px solid {VIOLET}; animation: ot-roll 0.9s linear infinite, ot-bounce 0.9s ease-in-out infinite; }}
 .ot-ball::after {{ content: ""; position: absolute; inset: 8px; background: {VIOLET}; border-radius: 3px;
                   clip-path: polygon(50% 0, 100% 38%, 82% 100%, 18% 100%, 0 38%); }}
+.ot-busy-ball .ot-ball3d {{ animation: ot-bounce 0.9s ease-in-out infinite; }}
 .ot-shadow {{ width: 22px; height: 5px; border-radius: 50%; background: rgba(255,126,182,.55);
              margin: -2px 0 0 3px; animation: ot-shadow 0.9s ease-in-out infinite; }}
 @keyframes ot-roll {{ to {{ transform: rotate(360deg); }} }}
@@ -204,8 +286,9 @@ def welcome():
              ("🚩", "5 · Karar", "Perspektife uygun ofsayt çizgisi ve metre cinsinden fark.")]
     grid = "".join(f'<div class="ot-hero-card"><div class="ot-hero-ico">{i}</div><b>{t}</b><span>{d}</span></div>'
                    for i, t, d in cards)
-    return (f'<div class="ot-hero"><h3>Ofsayt pozisyonunu beş adımda inceleyin</h3>'
-            f'<p>Başlamak için yukarıdan 10–15 saniyelik bir maç videosu ya da tek bir kare yükleyin.</p>'
+    return (f'<div class="ot-hero"><div class="ot-hero-head"><div><h3>Ofsayt pozisyonunu beş adımda inceleyin</h3>'
+            f'<p>Başlamak için yukarıdan 10–15 saniyelik bir maç videosu ya da tek bir kare yükleyin.</p></div>'
+            f'<div class="ot-float">{ball3d(104)}<div class="ot-float-shadow"></div></div></div>'
             f'<div class="ot-hero-grid">{grid}</div></div>')
 
 
@@ -237,7 +320,7 @@ def verdict_card(decision, diff_m, band, reason, line_source=""):
 
 
 def busy(text):
-    return (f'<div class="ot-busy"><div><div class="ot-ball"></div><div class="ot-shadow"></div></div>'
+    return (f'<div class="ot-busy"><div class="ot-busy-ball">{ball3d(30, "fast")}<div class="ot-shadow"></div></div>'
             f'<span>{html.escape(text)}</span></div>')
 
 
@@ -266,14 +349,15 @@ TRANSITION_CSS = f"""
                   background: rgba(253,248,243,.2); overflow: visible; }}
 .ot-trans-track::before {{ content: ""; position: absolute; left: 0; top: 0; height: 100%; border-radius: 4px;
                           background: {PINK}; animation: ot-fill .9s ease forwards; }}
-.ot-trans-ball {{ position: absolute; top: -9px; width: 22px; height: 22px; border-radius: 50%;
-                 background: radial-gradient(circle at 35% 35%, #fff 0 40%, {MARSHMALLOW} 41%); border: 2px solid {VIOLET_DARK};
-                 animation: ot-kick .9s ease forwards; }}
+.ot-trans-ball {{ position: absolute; top: -13px; width: 30px; height: 30px; border-radius: 50%;
+                 box-shadow: 0 8px 14px rgba(20,8,40,.45); animation: ot-kick .9s ease forwards; }}
+.ot-trans-ball .ot-ball3d i {{ animation-duration: .45s; }}
+.ot-trans-num {{ transform-style: preserve-3d; }}
 @keyframes ot-trans-out {{ 0%, 70% {{ opacity: 1; }} 100% {{ opacity: 0; visibility: hidden; }} }}
-@keyframes ot-pop {{ from {{ transform: scale(.3); opacity: 0; }} to {{ transform: scale(1); opacity: 1; }} }}
-@keyframes ot-rise {{ from {{ transform: translateY(14px); opacity: 0; }} to {{ transform: none; opacity: 1; }} }}
+@keyframes ot-pop {{ from {{ transform: perspective(500px) rotateY(-200deg) scale(.4); opacity: 0; }} to {{ transform: perspective(500px) rotateY(0) scale(1); opacity: 1; }} }}
+@keyframes ot-rise {{ from {{ transform: perspective(600px) rotateX(70deg) translateY(14px); opacity: 0; }} to {{ transform: none; opacity: 1; }} }}
 @keyframes ot-fill {{ from {{ width: 0; }} to {{ width: 100%; }} }}
-@keyframes ot-kick {{ from {{ left: -11px; transform: rotate(0); }} to {{ left: 249px; transform: rotate(540deg); }} }}
+@keyframes ot-kick {{ 0% {{ left: -15px; }} 45% {{ top: -30px; }} 100% {{ left: 245px; top: -13px; }} }}
 </style>
 """
 
@@ -283,4 +367,4 @@ def transition(step_index):
     title, sub = STEP_INTRO[step_index]
     return (TRANSITION_CSS + f'<div class="ot-trans"><div class="ot-trans-num">{step_index + 1}</div>'
             f'<div class="ot-trans-title">{html.escape(title)}</div><div class="ot-trans-sub">{html.escape(sub)}</div>'
-            f'<div class="ot-trans-track"><div class="ot-trans-ball"></div></div></div>')
+            f'<div class="ot-trans-track"><div class="ot-trans-ball">{ball3d(30, "fast")}</div></div></div>')
