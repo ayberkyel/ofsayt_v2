@@ -1,0 +1,22 @@
+# Arayüz teması: marshmallow beyazı (arka plan), galactic violet (yazı, yan menü), bubblegum pink (vurgu)
+[theme]
+base = "light"
+primaryColor = "#FF7EB6"              # bubblegum pink: ana düğmeler, kaydırıcılar, seçimler
+backgroundColor = "#FDF8F3"           # marshmallow beyazı
+secondaryBackgroundColor = "#F3ECF8"  # açık lila: kutular, giriş alanları
+textColor = "#2E1A4F"                 # koyu galactic violet
+linkColor = "#C2367F"
+borderColor = "#E4D6F0"
+font = "Poppins:https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+headingFont = "Poppins:https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+baseRadius = "0.75rem"
+buttonRadius = "full"
+showWidgetBorder = true
+chartCategoricalColors = ["#4A2A7A", "#FF7EB6", "#9B6FD1", "#FFB3D4"]
+
+[theme.sidebar]
+backgroundColor = "#4A2A7A"           # galactic violet
+secondaryBackgroundColor = "#5E3A92"
+textColor = "#FDF8F3"
+primaryColor = "#FF7EB6"
+borderColor = "#6E4AA3"

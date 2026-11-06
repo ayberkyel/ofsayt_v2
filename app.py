@@ -44,7 +44,52 @@ SCENES = ROOT / "scenes"
 TEAM_NAMES = {0: "Takım A", 1: "Takım B"}
 STEPS = ["1 · Kare seçimi", "2 · Top konumu", "3 · Oyuncu tespiti", "4 · Kalibrasyon", "5 · Sonuç"]
 
-st.set_page_config(page_title="Ofsayt Tespit Sistemi", layout="wide")
+st.set_page_config(page_title="Ofsayt Tespit Sistemi", page_icon="⚽", layout="wide")
+
+# Renk paleti (temel tema .streamlit/config.toml içinde; burada yalnızca düğme ve başlık süslemeleri)
+MARSHMALLOW, VIOLET, VIOLET_2, PINK, PINK_LIGHT = "#FDF8F3", "#4A2A7A", "#6B3FA0", "#FF7EB6", "#FFD3E6"
+st.markdown(f"""
+<style>
+/* Başlıklar */
+[data-testid="stMain"] h1, [data-testid="stMain"] h2, [data-testid="stMain"] h3 {{
+  color: {VIOLET} !important; letter-spacing: -0.01em;
+}}
+[data-testid="stSidebar"] h1 {{ color: {MARSHMALLOW} !important; }}
+[data-testid="stSidebar"] h1::after {{
+  content: ""; display: block; width: 3rem; height: 4px; border-radius: 4px; margin-top: .4rem; background: {PINK};
+}}
+[data-testid="stMain"] h2 {{
+  border-bottom: 3px solid {PINK}; padding-bottom: .35rem; display: inline-block;
+}}
+/* Ana düğmeler: violet -> pink geçişli */
+[data-testid="stBaseButton-primary"] {{
+  background: linear-gradient(135deg, {VIOLET} 0%, {VIOLET_2} 45%, {PINK} 100%) !important;
+  color: {MARSHMALLOW} !important; border: none !important; font-weight: 600 !important;
+  box-shadow: 0 4px 14px rgba(74, 42, 122, .25); transition: transform .12s ease, box-shadow .12s ease;
+}}
+[data-testid="stBaseButton-primary"]:hover {{
+  transform: translateY(-1px); box-shadow: 0 6px 18px rgba(255, 126, 182, .45);
+}}
+/* İkincil düğmeler: marshmallow zemin, violet çerçeve, hover'da pembe */
+[data-testid="stBaseButton-secondary"] {{
+  background: {MARSHMALLOW} !important; color: {VIOLET} !important;
+  border: 1.5px solid {VIOLET} !important; font-weight: 500 !important;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}}
+[data-testid="stBaseButton-secondary"]:hover {{
+  background: {PINK_LIGHT} !important; border-color: {PINK} !important; color: {VIOLET} !important;
+}}
+/* Yan menüdeki düğme (Her şeyi sıfırla) */
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {{
+  background: transparent !important; color: {MARSHMALLOW} !important; border-color: {PINK} !important;
+}}
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:hover {{
+  background: {PINK} !important; color: {VIOLET} !important;
+}}
+/* Çerçeveli kutular (ör. otomatik pas anı) */
+[data-testid="stVerticalBlockBorderWrapper"] {{ border-color: #E4D6F0 !important; }}
+</style>
+""", unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------------------------
@@ -91,8 +136,20 @@ def auto_stop_player(path, stop_t, fps, lead=3.0, height=440):
     b64 = base64.b64encode(path.read_bytes()).decode()
     start = max(0.0, stop_t - lead)
     html = """
-<div style="font-family:sans-serif;color:#888">
-  <video id="v" style="width:100%;max-height:360px;background:#000" muted playsinline controls
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; }
+  #replay { font-family: Poppins, sans-serif; font-weight: 600; font-size: 14px; color: #FDF8F3; cursor: pointer;
+            border: none; border-radius: 999px; padding: 8px 18px;
+            background: linear-gradient(135deg, #4A2A7A 0%, #6B3FA0 45%, #FF7EB6 100%);
+            box-shadow: 0 4px 14px rgba(74, 42, 122, .25); }
+  #replay:hover { box-shadow: 0 6px 18px rgba(255, 126, 182, .45); }
+  #rate { font-family: Poppins, sans-serif; border: 1.5px solid #4A2A7A; border-radius: 999px; padding: 3px 8px;
+          background: #FDF8F3; color: #4A2A7A; }
+  #msg { color: #C2367F; font-weight: 600; }
+</style>
+<div style="font-family:Poppins,sans-serif;color:#4A2A7A">
+  <video id="v" style="width:100%;max-height:360px;background:#2E1A4F;border-radius:12px" muted playsinline controls
          src="data:__MIME__;base64,__B64__"></video>
   <div style="display:flex;gap:10px;align-items:center;margin-top:6px;font-size:14px">
     <button id="replay">&#9654; Pas anına kadar oynat</button>
@@ -374,7 +431,7 @@ if step == STEPS[0]:
                         for col, c in zip(st.columns(len(events)), events):
                             mark = "✅ " if c.frame == b.frame else ""
                             col.button(f"{mark}Kare {c.frame} · {c.time:.2f} s · güç {c.score:.2f}",
-                                       key=f"cand_{c.frame}", width="stretch",
+                                       key=f"cand_{c.frame}", width="stretch", type="primary" if c.frame == b.frame else "secondary",
                                        on_click=lambda f=c.frame: s.update(frame_idx=f, pass_pick=f))
                     with st.expander("Top hızı / pas skoru grafiği"):
                         st.line_chart(pd.DataFrame({"top hızı (px/kare)": res.speed, "pas skoru": res.score},
