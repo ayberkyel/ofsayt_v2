@@ -9,7 +9,7 @@ Bu belge ise bütün resmi ve sırayla yapılacakları anlatır.
 ## 0. Büyük resim: Sistem ne yapıyor?
 
 ```
- Video ──► [1] Pas anı karesi ──► [2] Top tıklama
+ Video ──► [1] Pas anı karesi (otomatik: top izi + hız değişimi) ──► [2] Top tıklama
                     │
                     ▼
           [3] YOLOv8: oyuncu / kaleci / hakem kutuları
@@ -47,7 +47,8 @@ ofsayt_v2/
 │   ├── offside.py             Ofsayt karar motoru (kural + sınırda bandı)
 │   ├── pipeline.py            "Sahne" → karar (arayüz + analizler aynı kodu kullanır)
 │   ├── drawing.py             Kutular, çizgiler, kuşbakışı mini saha
-│   └── video.py               Video bilgisi ve kare okuma
+│   ├── video.py               Video bilgisi ve kare okuma
+│   └── pass_detect.py         Otomatik pas anı tespiti (top izi, kamera hareketi telafisi)
 ├── scripts/
 │   ├── prepare_dataset.py     ADIM 1: CVAT zip → YOLO veri seti (sızıntısız bölme)
 │   ├── relabel_roles.py       ADIM 1b: kaybolan kaleci/hakem sınıflarını yarı otomatik geri getirme
@@ -57,7 +58,8 @@ ofsayt_v2/
 │   └── sensitivity.py         ADIM 7: tıklama hatası duyarlılık analizi
 ├── tests/
 │   ├── test_core.py           Geometri + kural testleri (sentetik, bilinen cevaplı)
-│   └── test_app.py            Arayüzün tüm adımlarının hatasız çalıştığı testi
+│   ├── test_app.py            Arayüzün tüm adımlarının hatasız çalıştığı testi
+│   └── test_pass.py           Otomatik pas anı testi (sentetik video, bilinen pas karesi)
 ├── data/dataset/              (prepare_dataset.py üretir)
 ├── models/best.pt             (train.py kopyalar)
 ├── runs/                      (eğitim çıktıları, grafikler)
@@ -250,7 +252,7 @@ Tarayıcıda `http://localhost:8501` açılır.
 
 | Adım | Yapılacak | Arka planda |
 |---|---|---|
-| 1 Kare | Video yükle (veya dosya yolunu yaz), slider ve ±1 / ±10 butonlarıyla pas anını bul | `cv2.CAP_PROP_POS_FRAMES` ile kare okunur |
+| 1 Kare | Video yükle (veya dosya yolunu yaz), **🤖 Pas anını bul** ile pas karesi otomatik bulunur ve video o karede kendiliğinden durur; gerekirse slider ve ±1 / ±10 ile düzelt | COCO YOLOv8 `sports ball` ile top izlenir, kamera hareketi optik akışla çıkarılır, topun hız vektörünün ani değiştiği ilk kare seçilir; top konumu 2. adıma otomatik aktarılır |
 | 2 Top | Topun yere değdiği noktaya tıkla | Ekran koordinatı orijinal çözünürlüğe ölçeklenir |
 | 3 Tespit | "Tespit et" → tabloyu kontrol et, yanlış takımı düzelt, yanlış tespiti "Yok say" yap, eksik oyuncuyu ekleme moduyla ekle | YOLOv8 + KMeans |
 | 4 Kalibrasyon | Önce kalenin görüntüde hangi tarafta olduğunu seç. Sağdaki şemada kırmızı halkayla gösterilen noktayı görüntüde bul ve tıkla; liste kendiliğinden sonraki noktaya geçer. 5-6 nokta. Sarı şablon gerçek çizgilerle örtüşmeli | `cv2.findHomography` (8'den az noktada tüm noktalarla en küçük kareler) + tutarlılık kontrolleri |
@@ -391,6 +393,7 @@ kalmaktadır; ±10 px'te σ = 0.15 m'ye çıkar ve sınırdaki pozisyonların %1
 ```bash
 python tests/test_core.py     # geometri ve kurallar (bilinen cevaplı sentetik sahne)
 python tests/test_app.py      # arayüzün 5 adımı hatasız çalışıyor mu
+python tests/test_pass.py     # otomatik pas anı tespiti (sentetik video, hata ≤ 1 kare)
 ```
 `test_core.py` sahte bir kamera kurar, oyuncuları sahada **bilinen** metre konumlarına koyar
 ve sistemin bu konumları doğru geri hesaplayıp doğru kararı verdiğini doğrular. Jüri
@@ -404,6 +407,8 @@ ve sistemin bu konumları doğru geri hesaplayıp doğru kararı verdiğini doğ
    Arayüzdeki "alt kenarın kaleye en yakın ucu" seçeneğiyle iki yöntemin farkını göster.
 2. **Zemin düzlemi varsayımı:** Havadaki top veya yerden kalkmış ayak hatalı konumlanır.
 3. **Pas anı:** 25 FPS'de bir kare 40 ms'dir; oyuncular bu sürede 20-30 cm yer değiştirir.
+   Otomatik tespit topun görünmesine bağlıdır: top oyuncuların arkasında kalırsa veya çok
+   küçükse (geniş açı) yanlış kare seçilebilir; arayüz bu durumda "güven düşük" uyarısı verir.
 4. **Takım karışması:** Gölge, benzer forma renkleri. Arayüzde elle düzeltilebilir.
 5. **Kadraj:** Kaleci görünmüyorsa sondan ikinci savunmacı yanlış belirlenir (arayüz uyarır).
 6. **Tek kamera, akademik prototip:** Gerçek VAR'ın çok kameralı 3B altyapısıyla karşılaştırılamaz.

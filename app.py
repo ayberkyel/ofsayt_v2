@@ -4,7 +4,8 @@ Ofsayt Tespit Sistemi — Streamlit arayüzü (rapor Bölüm 6 ve 10).
 Çalıştırma:   streamlit run app.py
 
 Akış (sol menüdeki adımlar):
-  1 Kare        : video yükle, slider ile pas anını seç (görsel de yüklenebilir)
+  1 Kare        : video yükle, pas anı otomatik bulunur ve video o anda kendiliğinden durur
+                  (kaydırıcıyla düzeltilebilir; görsel de yüklenebilir)
   2 Top         : topun yere temas noktasına tıkla
   3 Tespit      : YOLOv8 + forma rengine göre takım ayrımı; gerekirse elle düzelt
   4 Kalibrasyon : sahada bilinen en az 4 noktaya tıkla -> homography
@@ -13,6 +14,7 @@ Akış (sol menüdeki adımlar):
 Streamlit her etkileşimde betiği baştan çalıştırır. Bu yüzden tüm durum
 (st.session_state) içinde tutulur ve model @st.cache_resource ile bir kez yüklenir.
 """
+import base64
 import json
 import time
 from pathlib import Path
@@ -21,6 +23,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 
 from src.click_image import click_image
@@ -29,6 +32,7 @@ from src.calibration import (compute_homography, draw_template, geometry_warning
 from src.detector import Detection, PlayerDetector, assign_teams
 from src.drawing import draw_detections, draw_point, draw_result, keypoint_guide, minimap
 from src.offside import OFFSIDE, ONSIDE, BORDERLINE
+from src.pass_detect import detect_pass
 from src.calibration import image_to_pitch
 from src.pipeline import decide, offpitch_ids
 from src.pitch import KEYPOINTS, PITCH_LENGTH, is_size_dependent, ordered_keypoints
@@ -56,6 +60,74 @@ def default_weights():
 @st.cache_resource(show_spinner="Model yükleniyor...")
 def load_detector(path):
     return PlayerDetector(path)
+
+
+@st.cache_resource(show_spinner="Top tespit modeli yükleniyor...")
+def load_ball_model(name="yolov8s.pt"):
+    """COCO ile eğitilmiş YOLOv8 ('sports ball' sınıfı). Dosya yoksa ultralytics otomatik indirir."""
+    from ultralytics import YOLO
+    local = ROOT / name
+    return YOLO(str(local) if local.exists() else name)
+
+
+MAX_INLINE_VIDEO = 40 * 1024 * 1024   # bundan büyük videolar tarayıcıya gömülmez
+
+
+def auto_stop_player(path, stop_t, fps, lead=3.0, height=440):
+    """Videoyu pas anından `lead` sn önce başlatır ve TAM pas karesinde kendiliğinden durdurur.
+
+    st.video'nun end_time'ı yalnızca tam saniye kabul eder ve ~0.25 sn geç durur; ofsayt için tek
+    kare (40 ms) bile önemlidir. Bu yüzden küçük bir HTML oynatıcı kullanılır:
+    requestVideoFrameCallback her kare ekrana çizildiğinde çağrılır; zaman pas anına ulaşınca video
+    durdurulur ve currentTime tam pas karesine sabitlenir.
+    """
+    path = Path(path)
+    if path.stat().st_size > MAX_INLINE_VIDEO:
+        st.video(str(path), start_time=int(max(0, stop_t - lead)), end_time=int(np.ceil(stop_t)),
+                 autoplay=True, muted=True)
+        st.caption("Video büyük olduğu için standart oynatıcı kullanıldı (durma ±1 sn hassasiyetinde).")
+        return
+    mime = {".webm": "video/webm"}.get(path.suffix.lower(), "video/mp4")
+    b64 = base64.b64encode(path.read_bytes()).decode()
+    start = max(0.0, stop_t - lead)
+    html = """
+<div style="font-family:sans-serif;color:#888">
+  <video id="v" style="width:100%;max-height:360px;background:#000" muted playsinline controls
+         src="data:__MIME__;base64,__B64__"></video>
+  <div style="display:flex;gap:10px;align-items:center;margin-top:6px;font-size:14px">
+    <button id="replay">&#9654; Pas anına kadar oynat</button>
+    <label>Hız <select id="rate"><option>0.25</option><option>0.5</option><option selected>1</option></select></label>
+    <span id="msg"></span>
+  </div>
+</div>
+<script>
+const v = document.getElementById('v'), msg = document.getElementById('msg');
+const STOP = __STOP__, START = __START__, HALF = 0.5 / __FPS__;
+let armed = true;
+function stopHere() {
+  v.pause(); v.currentTime = STOP; armed = false;
+  msg.textContent = '⏸ Pas anı: t = ' + STOP.toFixed(2) + ' s (otomatik durduruldu)';
+}
+function check(now, meta) {
+  if (armed && meta.mediaTime >= STOP - HALF) stopHere();
+  if (armed) v.requestVideoFrameCallback(check);
+}
+function play() {
+  armed = true; msg.textContent = 'Oynatılıyor...';
+  v.playbackRate = parseFloat(document.getElementById('rate').value);
+  v.currentTime = START;
+  if ('requestVideoFrameCallback' in v) v.requestVideoFrameCallback(check);
+  v.play().catch(() => { msg.textContent = 'Oynatmak için düğmeye basın.'; });
+}
+v.addEventListener('timeupdate', () => { if (armed && v.currentTime >= STOP) stopHere(); });
+v.addEventListener('error', () => { msg.textContent = 'Tarayıcı bu video biçimini oynatamıyor (aşağıdaki kare yine doğrudur).'; });
+v.addEventListener('loadedmetadata', play, {once: true});
+document.getElementById('replay').onclick = play;
+document.getElementById('rate').onchange = play;
+</script>"""
+    html = (html.replace("__MIME__", mime).replace("__STOP__", f"{stop_t:.4f}")
+            .replace("__START__", f"{start:.4f}").replace("__FPS__", f"{fps:.3f}").replace("__B64__", b64))
+    components.html(html, height=height)
 
 
 def ss():
@@ -238,6 +310,7 @@ if step == STEPS[0]:
         s.frame_idx = 0
         s.info = None if s.is_image else video_info(path)
         s.frame = None
+        s.pass_res = None
         reset_after_frame()
 
     if s.video_path and s.is_image:
@@ -252,6 +325,56 @@ if step == STEPS[0]:
         info = s.info
         st.caption(f"{info['frames']} kare · {info['fps']:.1f} FPS · {info['width']}x{info['height']} · "
                    f"1 kare ≈ {1000/info['fps']:.0f} ms")
+
+        # ---- Otomatik pas anı tespiti + pas anında kendiliğinden duran oynatıcı ----
+        with st.container(border=True):
+            st.markdown("**🤖 Pas anını otomatik bul** — top izlenir, topun ayaktan ayrıldığı kare bulunur "
+                        "ve video o anda kendiliğinden durur.")
+            a1, a2, a3 = st.columns([2, 2, 3])
+            stride = a1.select_slider("Tarama adımı", [1, 2, 3, 4], value=2,
+                                      format_func=lambda v: "her kare" if v == 1 else f"{v} karede bir",
+                                      help="Seyrek tarama hızlıdır; bulunan adayın çevresi yine her karede taranır.")
+            ball_sz = a2.select_slider("Top için model boyutu", [960, 1280], value=1280,
+                                       help="Top küçük bir nesnedir; 1280 daha iyi bulur ama daha yavaştır.")
+            if a3.button("🤖 Pas anını bul", type="primary", width="stretch"):
+                bar = st.progress(0.0, text="Video taranıyor (top + oyuncular)...")
+                t0 = time.time()
+                try:
+                    res = detect_pass(s.video_path, load_ball_model(), stride=stride, imgsz=ball_sz,
+                                      progress=lambda f: bar.progress(min(f, 1.0), text=f"Video taranıyor... %{f * 100:.0f}"))
+                except Exception as e:      # video okunamazsa / model inemezse arayüz çökmesin
+                    res = None
+                    st.error(f"Otomatik tespit başarısız: {e}")
+                bar.empty()
+                if res is not None:
+                    s.pass_res, s.pass_time = res, time.time() - t0
+                    if res.best is not None:
+                        s.frame_idx = res.best.frame
+                    st.rerun()
+
+            res = s.get("pass_res")
+            if res is not None:
+                if res.best is None:
+                    st.warning(f"Pas anı bulunamadı (top karelerin %{res.ball_ratio * 100:.0f} kadarında görüldü). "
+                               "Kareyi aşağıdaki kaydırıcıyla elle seçin.")
+                else:
+                    b = res.best
+                    st.success(f"Pas anı: **kare {b.frame}** · t = {b.time:.2f} s  "
+                               f"(top karelerin %{res.ball_ratio * 100:.0f} kadarında görüldü · "
+                               f"{s.get('pass_time', 0):.0f} sn sürdü)")
+                    if res.ball_ratio < 0.3 or not b.near_player:
+                        st.warning("Güven düşük: top az görüldü veya pas anında bir oyuncunun ayağında değil. "
+                                   "Kareyi -1 / +1 ile kontrol edin.")
+                    auto_stop_player(s.video_path, (b.frame + 0.5) / info["fps"], info["fps"])
+                    if len(res.candidates) > 1:
+                        st.caption("Diğer adaylar (tıklayınca o kareye gidilir):")
+                        for col, c in zip(st.columns(len(res.candidates)), res.candidates):
+                            col.button(f"Kare {c.frame} · {c.time:.2f} s · skor {c.score:.2f}",
+                                       key=f"cand_{c.frame}", width="stretch",
+                                       on_click=lambda f=c.frame: s.update(frame_idx=f))
+                    with st.expander("Top hızı / pas skoru grafiği"):
+                        st.line_chart(pd.DataFrame({"top hızı (px/kare)": res.speed, "pas skoru": res.score},
+                                                   index=res.frames))
 
         def shift(d):
             s.frame_idx = int(np.clip(s.frame_idx + d, 0, info["frames"] - 1))
@@ -268,7 +391,13 @@ if step == STEPS[0]:
         if st.button("✅ Pas anı bu kare", type="primary"):
             s.frame, s.frame_name = frame, f"{Path(s.video_path).stem}_kare{s.frame_idx}"
             reset_after_frame()
-            st.success("Kare seçildi. Sol menüden **2 · Top konumu** adımına geçin.")
+            res = s.get("pass_res")
+            if res is not None and res.best is not None and res.best.frame == s.frame_idx and res.best.ball_px:
+                s.ball = res.best.ball_px      # otomatik bulunan top konumu (2. adımda düzeltilebilir)
+                st.success("Kare seçildi; top konumu da otomatik işaretlendi. Sol menüden "
+                           "**2 · Top konumu** adımında kontrol edin.")
+            else:
+                st.success("Kare seçildi. Sol menüden **2 · Top konumu** adımına geçin.")
         st.info("İpucu: Pasın verildiği İLK kareyi seçin (topun ayaktan ayrıldığı an). "
                 "25 FPS'de bir kare 40 ms'dir ve bu sürede oyuncular 20-30 cm yer değiştirebilir.")
     else:
