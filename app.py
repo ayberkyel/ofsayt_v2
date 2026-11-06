@@ -44,6 +44,15 @@ UPLOADS = ROOT / "data" / "uploads"
 SCENES = ROOT / "scenes"
 TEAM_NAMES = {0: "Takım A", 1: "Takım B"}
 STEPS = ["1 · Kare seçimi", "2 · Top konumu", "3 · Oyuncu tespiti", "4 · Kalibrasyon", "5 · Sonuç"]
+EXAMPLE_DIR = ROOT / "examples"
+EXAMPLES = [   # 1. adımdaki "Örnek pozisyonlar" kartları
+    dict(title="MUN – MCI · video", file=EXAMPLE_DIR / "mun_mci_video.mp4", thumb=EXAMPLE_DIR / "mun_mci_video_kapak.jpg",
+         desc="10 sn'lik yayın klibi. “Pas anını bul” ile otomatik pas tespitini deneyin (pas: 155. kare)."),
+    dict(title="BRE – LIV · tek kare", file=EXAMPLE_DIR / "bre_liv.jpg", thumb=EXAMPLE_DIR / "bre_liv.jpg",
+         desc="Geniş açı, kale sağda. Maçta ofsayt verilen pozisyon."),
+    dict(title="CHE – BUR · tek kare", file=EXAMPLE_DIR / "che_bur.jpg", thumb=EXAMPLE_DIR / "che_bur.jpg",
+         desc="Farklı kamera açısı, kale solda. Sistemin farklı açıda çalıştığını görmek için."),
+]
 
 st.set_page_config(page_title="Ofsayt Tespit Sistemi", page_icon=ui.logo_image(), layout="wide")
 # Tema renkleri .streamlit/config.toml'da; düğme, başlık, kart ve animasyon stilleri src/ui.py'de
@@ -303,22 +312,10 @@ st.markdown(ui.stepper(["Kare", "Top", "Oyuncular", "Kalibrasyon", "Karar"], STE
 # ------------------------------------------------------------------------------------
 if step == STEPS[0]:
     st.header("1 · Video yükle ve pas anını seç")
-    up = st.file_uploader("Maç videosu (10-15 sn) veya tek kare görsel",
-                          type=["mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png"])
-    local = st.text_input("...veya bilgisayardaki dosyanın yolu (büyük videolar için)", "")
-    local = local.strip().strip('"')
-    src = None
-    if up is not None and s.src_key != (up.name, up.size):
-        UPLOADS.mkdir(parents=True, exist_ok=True)
-        src = UPLOADS / up.name
-        src.write_bytes(up.getbuffer())
-        key = (up.name, up.size)
-    elif local and Path(local).is_file() and s.src_key != (local, 0):
-        src, key = Path(local), (local, 0)
-    elif local and not Path(local).is_file():
-        st.error("Dosya bulunamadı.")
-    if src is not None:
-        path = src
+
+    def open_source(path, key):
+        """Yeni bir video / görseli açar ve önceki pozisyonun bütün durumunu sıfırlar."""
+        path = Path(path)
         s.src_key = key
         s.is_image = path.suffix.lower() in {".jpg", ".jpeg", ".png"}
         s.video_path = str(path)
@@ -327,6 +324,41 @@ if step == STEPS[0]:
         s.frame = None
         s.pass_res = None
         reset_after_frame()
+
+    # Örnek pozisyonlar sayfanın üstünde görünür ama EN SON doldurulur: böylece yükleme / yol ile
+    # açılan dosya da hesaba katılır ve "seçili örnek" vurgusu her zaman güncel olur.
+    examples_box = st.container()
+
+    up = st.file_uploader("Maç videosu (10-15 sn) veya tek kare görsel",
+                          type=["mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png"])
+    local = st.text_input("...veya bilgisayardaki dosyanın yolu (büyük videolar için)", "")
+    local = local.strip().strip('"')
+    # Yükleme / yol yalnızca DEĞİŞTİĞİNDE yeni kaynak sayılır; böylece örnek açıldıktan sonra
+    # önceden yüklenmiş dosya örneğin üstüne yeniden yüklenmez.
+    if up is not None and s.get("last_upload") != (up.name, up.size):
+        s.last_upload = (up.name, up.size)
+        UPLOADS.mkdir(parents=True, exist_ok=True)
+        dst = UPLOADS / up.name
+        dst.write_bytes(up.getbuffer())
+        open_source(dst, (up.name, up.size))
+    elif local and s.get("last_local") != local:
+        if Path(local).is_file():
+            s.last_local = local
+            open_source(local, (local, 0))
+        else:
+            st.error("Dosya bulunamadı.")
+
+    # ---- Örnek pozisyonlar: dosyası olmayan biri de sistemi hemen deneyebilsin ----
+    with examples_box.expander("🎯 Örnek pozisyonlar — dosyanız yoksa buradan seçip deneyin",
+                               expanded=not s.video_path):
+        for col, ex in zip(st.columns(len(EXAMPLES)), EXAMPLES):
+            with col.container(border=True):
+                st.image(str(ex["thumb"]), width="stretch")
+                st.markdown(f"**{ex['title']}**")
+                st.caption(ex["desc"])
+                st.button("Bu örneği aç", key=f"ex_{ex['file'].stem}", width="stretch",
+                          type="primary" if s.src_key == ("örnek", ex["file"].name) else "secondary",
+                          on_click=open_source, args=(ex["file"], ("örnek", ex["file"].name)))
 
     if s.video_path and s.is_image:
         img = cv2.imdecode(np.fromfile(s.video_path, np.uint8), cv2.IMREAD_COLOR)
