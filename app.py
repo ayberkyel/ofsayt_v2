@@ -30,7 +30,7 @@ from src.click_image import click_image
 from src.calibration import (compute_homography, draw_template, geometry_warnings, has_general_position,
                              outside_pitch_ratio, player_width_m, position_uncertainty, reprojection_error)
 from src.detector import Detection, PlayerDetector, assign_teams
-from src.drawing import draw_detections, draw_point, draw_result, keypoint_guide, minimap
+from src.drawing import draw_detections, draw_point, draw_result, keypoint_guide, minimap, var_zoom
 from src.offside import OFFSIDE, ONSIDE, BORDERLINE
 from src.pass_detect import detect_pass
 from src import ui
@@ -156,6 +156,32 @@ document.getElementById('rate').onchange = play;
 
 def ss():
     return st.session_state
+
+
+def ball_center_at(res, frame_idx, max_gap=3):
+    """Otomatik pas taramasının izinden, verilen kareye en yakın bilinen top konumu (yoksa None)."""
+    if res is None or len(res.frames) == 0:
+        return None
+    d = np.abs(np.asarray(res.frames) - frame_idx)
+    for i in np.argsort(d):
+        if d[i] > max_gap:
+            break
+        if not np.isnan(res.ball[i]).any():
+            return (int(res.ball[i][0]), int(res.ball[i][1]))
+    return None
+
+
+@st.cache_data(max_entries=80, show_spinner=False)
+def strip_thumb(path, idx, center, width=360):
+    """Film şeridi küçük resmi. center verilirse topun çevresi (kare genişliğinin %18'i) büyütülür."""
+    fr = read_frame(path, idx)
+    h, w = fr.shape[:2]
+    if center is not None:
+        cw = int(0.18 * w); ch = int(cw * 9 / 16)
+        x0 = int(np.clip(center[0] - cw / 2, 0, w - cw)); y0 = int(np.clip(center[1] - ch / 2, 0, h - ch))
+        fr = fr[y0:y0 + ch, x0:x0 + cw]
+    fr = cv2.resize(fr, (width, int(fr.shape[0] * width / fr.shape[1])), interpolation=cv2.INTER_AREA)
+    return cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)
 
 
 def init_state():
@@ -302,6 +328,11 @@ with st.sidebar:
             del st.session_state[k]
         st.rerun()
 
+# Adım değiştiyse kısa geçiş ekranı (≈1,3 sn, kendiliğinden kaybolur; ilk açılışta gösterilmez)
+if s.get("last_step") is not None and s.last_step != step:
+    st.markdown(ui.transition(STEPS.index(step)), unsafe_allow_html=True)
+s.last_step = step
+
 # Üstte adım göstergesi: tamamlanan adımlar pembe tikli, şu anki adım mor
 st.markdown(ui.stepper(["Kare", "Top", "Oyuncular", "Kalibrasyon", "Karar"], STEPS.index(step),
                        [s.frame is not None, bool(s.ball), bool(s.dets), len(s.calib) >= 4, False]),
@@ -437,6 +468,17 @@ if step == STEPS[0]:
         c3.slider("Kare", 0, max(info["frames"] - 1, 0), key="frame_idx", label_visibility="collapsed")
         c4.button("+1 ▶", on_click=shift, args=(1,), width="stretch")
         c5.button("+10 ⏩", on_click=shift, args=(10,), width="stretch")
+
+        # ---- Pas anı film şeridi: seçili karenin 2 öncesi ve 2 sonrası ----
+        strip = [f for f in range(s.frame_idx - 2, s.frame_idx + 3) if 0 <= f < info["frames"]]
+        center = ball_center_at(s.get("pass_res"), s.frame_idx)
+        st.caption("🎞️ Çevre kareler — topun ayaktan ayrıldığı kareye tıklayın"
+                   + (" (topun çevresi büyütüldü)" if center else ""))
+        for i, (col, f) in enumerate(zip(st.columns(len(strip)), strip)):
+            col.image(strip_thumb(s.video_path, f, center), width="stretch")
+            col.button(f"Kare {f}" + (" ●" if f == s.frame_idx else ""), key=f"strip_{i}", width="stretch",
+                       type="primary" if f == s.frame_idx else "secondary",
+                       on_click=lambda f=f: s.update(frame_idx=f))
 
         frame = read_frame(s.video_path, s.frame_idx)
         st.image(to_rgb(frame), width=disp_w,
@@ -782,9 +824,22 @@ elif step == STEPS[4]:
         st.error("⚠️ Bu karar GEÇERSİZ: " + ", ".join(bad) + " — saha 0-105 m arasındadır. "
                  "Kalibrasyon hatalı; 4. adımda nokta isimlerini ve kale tarafını kontrol edin.")
 
+    # VAR yakın çekimi: hücumcu + çizgiyi belirleyen savunmacı (çizgi topa / orta çizgiye göreyse top)
+    line_def = None
+    if res.line_source == "savunmacı" and info["defender_ids"]:
+        line_def = min(zip(info["defender_ids"], info["defender_xs"]), key=lambda p: abs(p[1] - res.line_x))[0]
+    zoom = var_zoom(s.frame, s.dets, H, res, s.attacker_id, line_def,
+                    s.ball if res.line_source == "top" else None)
+    if zoom is not None:
+        st.markdown("#### 🔎 VAR yakın çekim")
+        st.image(to_rgb(zoom), width=disp_w,
+                 caption="Hücumcu ile ofsayt çizgisini belirleyen " +
+                         ("savunmacı" if line_def is not None else res.line_source) + " büyütülmüş olarak gösteriliyor.")
+
     out = draw_result(s.frame, s.dets, H, res, s.attacker_id, info["defender_ids"], s.ball, excl)
+    st.markdown("#### Tam kare")
     st.image(to_rgb(out), width=disp_w,
-             caption="Kırmızı çizgi: ofsayt çizgisi · Mavi çizgi: hücumcu · Kırmızı halka: savunmacılar. "
+             caption="Pembe çizgi: ofsayt çizgisi · Lila çizgi: hücumcu · Pembe halka: savunmacılar. "
                      "Çizgiler perspektif nedeniyle eğik görünür; bu doğru geometridir.")
     st.image(to_rgb(minimap(s.dets, H, excl, res, s.ball, s.attacker_id)), width=min(disp_w, 900))
     st.info("Not: Kendi yarı sahasında olma, kale vuruşu / taç / köşe vuruşundan gelen top ve oyuna "

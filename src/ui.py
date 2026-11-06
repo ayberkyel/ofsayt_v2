@@ -239,3 +239,48 @@ def verdict_card(decision, diff_m, band, reason, line_source=""):
 def busy(text):
     return (f'<div class="ot-busy"><div><div class="ot-ball"></div><div class="ot-shadow"></div></div>'
             f'<span>{html.escape(text)}</span></div>')
+
+
+# --------------------------------------------------------------------------------------
+# Adımlar arası geçiş ekranı
+# --------------------------------------------------------------------------------------
+STEP_INTRO = [("Kare seçimi", "Pas anını bulun"),
+              ("Top konumu", "Topun zemine değdiği noktayı işaretleyin"),
+              ("Oyuncu tespiti", "YOLOv8 oyuncuları bulur, takımlar forma rengiyle ayrılır"),
+              ("Kalibrasyon", "Sahada bilinen noktalara tıklayın: piksel → metre"),
+              ("Karar", "Ofsayt çizgisi hesaplanıyor")]
+
+TRANSITION_CSS = f"""
+<style>
+.ot-trans {{ position: fixed; inset: 0; z-index: 999999; pointer-events: none;
+            display: flex; align-items: center; justify-content: center; flex-direction: column; gap: .6rem;
+            background: radial-gradient(circle at 80% 20%, rgba(255,126,182,.55), transparent 45%),
+                        linear-gradient(135deg, {VIOLET_DARK} 0%, {VIOLET} 55%, {VIOLET_2} 100%);
+            animation: ot-trans-out 1.35s ease forwards; }}
+.ot-trans-num {{ width: 84px; height: 84px; border-radius: 50%; background: {PINK}; color: {MARSHMALLOW};
+                display: flex; align-items: center; justify-content: center; font-size: 2.4rem; font-weight: 800;
+                box-shadow: 0 0 0 10px rgba(255,126,182,.25); animation: ot-pop .45s cubic-bezier(.2,1.6,.4,1) both; }}
+.ot-trans-title {{ color: {MARSHMALLOW}; font-size: 2rem; font-weight: 800; animation: ot-rise .45s .08s ease both; }}
+.ot-trans-sub {{ color: {PINK_LIGHT}; font-size: 1.05rem; animation: ot-rise .45s .16s ease both; }}
+.ot-trans-track {{ position: relative; width: 260px; height: 4px; border-radius: 4px; margin-top: 1rem;
+                  background: rgba(253,248,243,.2); overflow: visible; }}
+.ot-trans-track::before {{ content: ""; position: absolute; left: 0; top: 0; height: 100%; border-radius: 4px;
+                          background: {PINK}; animation: ot-fill .9s ease forwards; }}
+.ot-trans-ball {{ position: absolute; top: -9px; width: 22px; height: 22px; border-radius: 50%;
+                 background: radial-gradient(circle at 35% 35%, #fff 0 40%, {MARSHMALLOW} 41%); border: 2px solid {VIOLET_DARK};
+                 animation: ot-kick .9s ease forwards; }}
+@keyframes ot-trans-out {{ 0%, 70% {{ opacity: 1; }} 100% {{ opacity: 0; visibility: hidden; }} }}
+@keyframes ot-pop {{ from {{ transform: scale(.3); opacity: 0; }} to {{ transform: scale(1); opacity: 1; }} }}
+@keyframes ot-rise {{ from {{ transform: translateY(14px); opacity: 0; }} to {{ transform: none; opacity: 1; }} }}
+@keyframes ot-fill {{ from {{ width: 0; }} to {{ width: 100%; }} }}
+@keyframes ot-kick {{ from {{ left: -11px; transform: rotate(0); }} to {{ left: 249px; transform: rotate(540deg); }} }}
+</style>
+"""
+
+
+def transition(step_index):
+    """Adım değişince ~1,3 sn görünüp kendiliğinden kaybolan tam ekran geçiş. Tıklamaları engellemez."""
+    title, sub = STEP_INTRO[step_index]
+    return (TRANSITION_CSS + f'<div class="ot-trans"><div class="ot-trans-num">{step_index + 1}</div>'
+            f'<div class="ot-trans-title">{html.escape(title)}</div><div class="ot-trans-sub">{html.escape(sub)}</div>'
+            f'<div class="ot-trans-track"><div class="ot-trans-ball"></div></div></div>')
