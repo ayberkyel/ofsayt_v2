@@ -349,7 +349,7 @@ if step == STEPS[0]:
                 if res is not None:
                     s.pass_res, s.pass_time = res, time.time() - t0
                     if res.best is not None:
-                        s.frame_idx = res.best.frame
+                        s.frame_idx = s.pass_pick = res.best.frame
                     st.rerun()
 
             res = s.get("pass_res")
@@ -358,20 +358,24 @@ if step == STEPS[0]:
                     st.warning(f"Pas anı bulunamadı (top karelerin %{res.ball_ratio * 100:.0f} kadarında görüldü). "
                                "Kareyi aşağıdaki kaydırıcıyla elle seçin.")
                 else:
-                    b = res.best
+                    b = next((c for c in res.candidates if c.frame == s.get("pass_pick")), res.best)
                     st.success(f"Pas anı: **kare {b.frame}** · t = {b.time:.2f} s  "
                                f"(top karelerin %{res.ball_ratio * 100:.0f} kadarında görüldü · "
                                f"{s.get('pass_time', 0):.0f} sn sürdü)")
                     if res.ball_ratio < 0.3 or not b.near_player:
                         st.warning("Güven düşük: top az görüldü veya pas anında bir oyuncunun ayağında değil. "
                                    "Kareyi -1 / +1 ile kontrol edin.")
+                    if b is res.best and getattr(res, "reason", ""):
+                        st.caption("ℹ️ " + res.reason)
                     auto_stop_player(s.video_path, (b.frame + 0.5) / info["fps"], info["fps"])
                     if len(res.candidates) > 1:
-                        st.caption("Diğer adaylar (tıklayınca o kareye gidilir):")
-                        for col, c in zip(st.columns(len(res.candidates)), res.candidates):
-                            col.button(f"Kare {c.frame} · {c.time:.2f} s · skor {c.score:.2f}",
+                        st.caption("Videodaki bütün vuruşlar (yanlış vuruş seçildiyse doğrusuna tıklayın):")
+                        events = sorted(res.candidates, key=lambda c: c.frame)
+                        for col, c in zip(st.columns(len(events)), events):
+                            mark = "✅ " if c.frame == b.frame else ""
+                            col.button(f"{mark}Kare {c.frame} · {c.time:.2f} s · güç {c.score:.2f}",
                                        key=f"cand_{c.frame}", width="stretch",
-                                       on_click=lambda f=c.frame: s.update(frame_idx=f))
+                                       on_click=lambda f=c.frame: s.update(frame_idx=f, pass_pick=f))
                     with st.expander("Top hızı / pas skoru grafiği"):
                         st.line_chart(pd.DataFrame({"top hızı (px/kare)": res.speed, "pas skoru": res.score},
                                                    index=res.frames))
@@ -392,8 +396,9 @@ if step == STEPS[0]:
             s.frame, s.frame_name = frame, f"{Path(s.video_path).stem}_kare{s.frame_idx}"
             reset_after_frame()
             res = s.get("pass_res")
-            if res is not None and res.best is not None and res.best.frame == s.frame_idx and res.best.ball_px:
-                s.ball = res.best.ball_px      # otomatik bulunan top konumu (2. adımda düzeltilebilir)
+            hit = next((c for c in (res.candidates if res is not None else []) if c.frame == s.frame_idx), None)
+            if hit is not None and hit.ball_px:
+                s.ball = hit.ball_px           # otomatik bulunan top konumu (2. adımda düzeltilebilir)
                 st.success("Kare seçildi; top konumu da otomatik işaretlendi. Sol menüden "
                            "**2 · Top konumu** adımında kontrol edin.")
             else:

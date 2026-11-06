@@ -4,20 +4,21 @@ Otomatik pas anı tespiti.
 Ofsayt kararı, pasın verildiği İLK karede (topun ayaktan ayrıldığı an) verilir. Bu modül o kareyi
 videodan otomatik bulur; kullanıcı yine de -1 / +1 düğmeleriyle düzeltebilir.
 
-Yöntem (dört adım):
-  1) Top tespiti   : COCO ile eğitilmiş YOLOv8'in "sports ball" (32) sınıfı her karede çalıştırılır.
-                     Aynı geçişte "person" (0) kutuları da alınır (topun bir oyuncunun ayağında olup
-                     olmadığını anlamak için). Kendi modelimizde top sınıfı yoktur.
-  2) Top izi       : Her karede birden çok aday olabilir (seyircideki top, beyaz ayakkabı...).
-                     Bir önceki konuma en yakın aday seçilir; kısa boşluklar doğrusal doldurulur.
-  3) Kamera hareketi: Yayın kamerası sürekli döner; topun EKRANDAKİ hızı kamera hareketini de içerir.
-                     Ardışık kareler arasındaki genel hareket (afin dönüşüm) arka plan köşe noktalarının
-                     optik akışından kestirilir ve topun hızından çıkarılır.
-  4) Pas skoru     : Pas = topun hız vektöründe ani değişim + sonrasında hızlanma + topun bir oyuncunun
-                     ayağına yakın olması. Top kontrolü (top yavaşlıyor) düşük skor alır.
-                     Skorun tepe yaptığı bölgede, topun hızlandığı İLK kare pas anı kabul edilir.
-
-Çıktı: en yüksek skorlu birkaç aday kare (en iyisi ilk sırada) ve grafik için kare başına hız/skor.
+Yöntem:
+  1) Top tespiti    : COCO ile eğitilmiş YOLOv8'in "sports ball" (32) sınıfı her karede çalıştırılır.
+                      Aynı geçişte "person" (0) kutuları da alınır. Kendi modelimizde top sınıfı yoktur.
+                      Çevresi çim olmayan adaylar (tribündeki ışık, reklam panosu, seyirci...) elenir.
+  2) Kamera hareketi: Yayın kamerası sürekli döner; topun EKRANDAKİ hızı kamera hareketini de içerir.
+                      Ardışık kareler arasındaki genel hareket (afin dönüşüm) arka plan köşe noktalarının
+                      optik akışından kestirilir ve topun hızından çıkarılır.
+  3) Top izi        : Adaylar kareler boyunca "iz parçalarına" bağlanır. Her parça; güven, çim oranı ve
+                      sahadaki gerçek yer değiştirmesine göre puanlanır. Bütün video boyunca kıpırdamayan
+                      bir nesne (saha kenarındaki yedek top gibi) oyun topu sayılmaz.
+  4) Vuruş skoru    : Topun hız vektöründe ani değişim + sonrasında hızlı top + oyuncunun ayağına yakınlık.
+                      Skorun tepe yaptığı bölgede topun hızlandığı İLK kare vuruş anıdır.
+  5) Pas seçimi     : Ofsayt klibinde genellikle önce pas, sonra şut vardır. Birden çok güçlü vuruş
+                      bulunursa SON vuruş şut kabul edilir ve ondan önceki vuruş pas olarak seçilir.
+                      Bütün vuruşlar kullanıcıya listelenir.
 """
 from dataclasses import dataclass, field
 
@@ -26,27 +27,29 @@ import numpy as np
 
 BALL_CLASS = 32      # COCO: sports ball
 PERSON_CLASS = 0     # COCO: person
+MIN_GREEN = 0.25     # top adayının çevresindeki en az çim oranı
 
 
 @dataclass
 class PassCandidate:
     frame: int
     time: float
-    score: float          # 0..1, en iyi adaya göre normalize
-    near_player: bool     # pas anında top bir oyuncunun ayağına yakın mı
+    score: float          # 0..1, en güçlü vuruşa göre normalize
+    near_player: bool     # vuruş anında top bir oyuncunun ayağına yakın mı
     ball_px: tuple | None # o karedeki top konumu (zemin teması: kutunun alt orta noktası)
 
 
 @dataclass
 class PassResult:
-    candidates: list                 # PassCandidate listesi, en iyisi ilk
+    candidates: list                 # seçilen pas ilk sırada, diğer vuruşlar zaman sırasıyla
     fps: float
     n_frames: int
-    ball_ratio: float                # topun bulunduğu analiz edilen karelerin oranı
+    ball_ratio: float                # topun izlendiği karelerin oranı
     frames: np.ndarray = field(repr=False)   # analiz edilen kare indeksleri
-    speed: np.ndarray = field(repr=False)    # kamera hareketi çıkarılmış top hızı (px/kare)
-    score: np.ndarray = field(repr=False)    # kare başına pas skoru
+    speed: np.ndarray = field(repr=False)    # kamera hareketi çıkarılmış top hızı (px/kare @1280)
+    score: np.ndarray = field(repr=False)    # kare başına vuruş skoru
     ball: np.ndarray = field(repr=False)     # (N, 2) top merkezi, bilinmiyorsa nan
+    reason: str = ""                          # seçimin açıklaması (arayüzde gösterilir)
 
     @property
     def best(self):
@@ -72,10 +75,23 @@ def _camera_motion(prev_gray, gray):
     return A if A is not None else eye
 
 
+def green_ratio(hsv, cx, cy, w, h):
+    """Adayın çevresindeki (kutunun ~4 katı) çim piksellerinin oranı. Gerçek top neredeyse hep çim üzerindedir."""
+    H, W = hsv.shape[:2]
+    r = max(w, h, 6)
+    x1, x2 = int(max(0, cx - 2 * r)), int(min(W, cx + 2 * r))
+    y1, y2 = int(max(0, cy - 2 * r)), int(min(H, cy + 2 * r))
+    p = hsv[y1:y2, x1:x2]
+    if p.size == 0:
+        return 0.0
+    g = (p[..., 0] >= 30) & (p[..., 0] <= 90) & (p[..., 1] > 40) & (p[..., 2] > 40)
+    return float(g.mean())
+
+
 def scan_video(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None, frame_range=None):
     """Videoyu tarar. Dönüş: dict(frames, balls, people, motion, fps, n_frames, size).
 
-    balls[i]  : o karedeki top adayları [(cx, cy, w, h, conf), ...]
+    balls[i]  : o karedeki top adayları [(cx, cy, w, h, conf, çim_oranı), ...]
     people[i] : kişi kutuları [(x1, y1, x2, y2), ...]
     motion[i] : frames[i-1] -> frames[i] kamera hareketi (2x3, analiz edilen kareler arası)
     """
@@ -107,11 +123,15 @@ def scan_video(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None,
 
             res = model.predict(frame, imgsz=imgsz, conf=conf, classes=[PERSON_CLASS, BALL_CLASS],
                                 verbose=False)[0]
+            hsv = None
             balls, people = [], []
             for b in res.boxes:
                 x1, y1, x2, y2 = b.xyxy[0].tolist()
                 if int(b.cls) == BALL_CLASS:
-                    balls.append(((x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1, float(b.conf)))
+                    if hsv is None:
+                        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                    cx, cy, bw, bh = (x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1
+                    balls.append((cx, cy, bw, bh, float(b.conf), green_ratio(hsv, cx, cy, bw, bh)))
                 elif float(b.conf) >= 0.25:
                     people.append((x1, y1, x2, y2))
             out["frames"].append(idx); out["balls"].append(balls)
@@ -126,67 +146,115 @@ def scan_video(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None,
 
 
 # --------------------------------------------------------------------------------------
-# 2) Top izi
+# 2) Top izi: iz parçaları
 # --------------------------------------------------------------------------------------
-def build_track(balls, size, max_gap=8):
-    """Her kare için tek top konumu seçer (N, 4: cx, cy, w, h; yoksa nan) ve kısa boşlukları doldurur."""
-    w, h = size
-    n = len(balls)
-    track = np.full((n, 4), np.nan)
-    last, last_i, vel = None, None, np.zeros(2)
-    jumps = set()                                     # izin yeniden başladığı kareler (boşluk doldurulmaz)
+def _move(A, p):
+    return A[:, :2] @ p + A[:, 2]
+
+
+def build_tracklets(balls, motion, size, max_gap=8, step=1):
+    """Adayları iz parçalarına bağlar. Konumlar her karede kamera hareketiyle taşınır; böylece hız,
+    kameradan bağımsız (sahadaki) harekettir. Dönüş: [dict(idx, box, conf, green, spread), ...]"""
+    w = size[0]
+    done, active = [], []
     for i, cands in enumerate(balls):
-        if not cands:
+        A = motion[i]
+        for t in active:                       # kamera hareketi + sabit hız tahmini
+            t["q"] = _move(A, t["q"]); t["gap"] += 1
+            t["world"] = t["world"]            # sahadaki konum yalnızca eşleşmede güncellenir
+        cands = [c for c in cands if (len(c) < 6 or c[5] >= MIN_GREEN)]
+        pairs = []
+        for ti, t in enumerate(active):
+            pred = t["q"] + t["vel"] * t["gap"]
+            limit = 0.04 * w * step + 10 * t["gap"]
+            for ci, c in enumerate(cands):
+                d = float(np.hypot(c[0] - pred[0], c[1] - pred[1]))
+                if d < limit:
+                    pairs.append((d / limit - 0.3 * c[4], ti, ci))
+        used_t, used_c = set(), set()
+        for _, ti, ci in sorted(pairs):
+            if ti in used_t or ci in used_c:
+                continue
+            used_t.add(ti); used_c.add(ci)
+            t, c = active[ti], cands[ci]
+            vstep = (np.array(c[:2]) - t["q"]) / t["gap"]         # kamerasız hız (px/kare)
+            t["vel"] = vstep
+            t["world"] = t["world"] + vstep * t["gap"]
+            t["wpts"].append(t["world"].copy())
+            t["q"] = np.array(c[:2], float); t["gap"] = 0
+            t["idx"].append(i); t["box"].append(c[:4]); t["conf"].append(c[4])
+            t["green"].append(c[5] if len(c) > 5 else 1.0)
+        for ci, c in enumerate(cands):
+            if ci not in used_c:
+                active.append(dict(q=np.array(c[:2], float), vel=np.zeros(2), gap=0, world=np.zeros(2),
+                                   wpts=[np.zeros(2)], idx=[i], box=[c[:4]], conf=[c[4]],
+                                   green=[c[5] if len(c) > 5 else 1.0]))
+        still = []
+        for t in active:
+            (done if t["gap"] > max_gap else still).append(t)
+        active = still
+    done += active
+    for t in done:
+        wp = np.array(t["wpts"])
+        t["spread"] = float(np.max(np.hypot(*(wp - wp[0]).T))) * (1280.0 / w)   # px @1280
+        moving = float(np.clip(t["spread"] / 120.0, 0.1, 1.0))                  # hiç kıpırdamayan = yedek top / sabit nesne
+        t["score"] = float(np.sum(np.array(t["conf"]) * np.array(t["green"]))) * moving
+    return done
+
+
+def build_track(balls, size, motion=None, max_gap=8, step=1):
+    """Her kare için tek top konumu (N, 4), iz parçası numarası (N,) ve doldurulmuş kare maskesi (N,) döndürür.
+
+    Bir karede birden çok iz parçası varsa en yüksek puanlı olan seçilir. En iyi parçanın %25'inden
+    düşük puanlı parçalar (kısa ömürlü yanlış tespitler) kullanılmaz. Parça içindeki kısa boşluklar
+    doğrusal doldurulur; farklı parçalar arasındaki geçişte hız hesaplanmaz.
+    """
+    n = len(balls)
+    if motion is None:
+        motion = [np.array([[1, 0, 0], [0, 1, 0]], float)] * n
+    tracks = sorted(build_tracklets(balls, motion, size, max_gap, step), key=lambda t: -t["score"])
+    track = np.full((n, 4), np.nan)
+    seg = np.full(n, -1)
+    interp = np.zeros(n, bool)
+    if not tracks:
+        return track, seg, interp
+    best = tracks[0]["score"]
+    for k, t in enumerate(tracks):
+        if t["score"] < 0.25 * best or len(t["idx"]) < 3:
             continue
-        c = np.array(cands)
-        if last is not None and i - last_i <= max_gap:
-            gap = i - last_i
-            pred = last[:2] + vel * gap               # sabit hız varsayımıyla beklenen konum
-            d = np.hypot(c[:, 0] - pred[0], c[:, 1] - pred[1])
-            limit = 0.04 * w * gap + 20               # beklenenden kare başına en fazla ~%4 ekran sapma
-            ok = d < limit
-            if ok.any():
-                # Mesafe ve güveni birlikte değerlendir
-                cost = d / limit - 0.5 * c[:, 4]
-                j = int(np.argmin(np.where(ok, cost, np.inf)))
-            else:
-                j = int(np.argmax(c[:, 4]))
-                if c[j, 4] < 0.3:                  # zayıf ve uzak aday: büyük olasılıkla yanlış
+        idx, box = t["idx"], np.array(t["box"], float)
+        lo, hi = idx[0], idx[-1]
+        if (seg[lo:hi + 1] >= 0).any():        # daha iyi bir parçanın kapsadığı kareleri ezme
+            free = seg[lo:hi + 1] < 0
+            if free.mean() < 0.5:
+                continue
+        for j, (a, b) in enumerate(zip(idx[:-1], idx[1:])):
+            for f in range(a, b + 1):
+                if seg[f] >= 0:
                     continue
-                jumps.add(i)
-        else:
-            j = int(np.argmax(c[:, 4]))
-            jumps.add(i)
-        if i in jumps:
-            vel = np.zeros(2)
-        else:
-            vel = (c[j, :2] - last[:2]) / (i - last_i)
-        track[i] = c[j, :4]
-        last, last_i = c[j], i
-
-    # Kısa boşlukları doğrusal doldur
-    known = np.where(~np.isnan(track[:, 0]))[0]
-    for a, b in zip(known[:-1], known[1:]):
-        if 1 < b - a <= max_gap and b not in jumps:
-            t = np.linspace(0, 1, b - a + 1)[1:-1, None]
-            track[a + 1:b] = (1 - t) * track[a] + t * track[b]
-    return track
+                u = 0.0 if b == a else (f - a) / (b - a)
+                track[f] = (1 - u) * box[j] + u * box[j + 1]
+                seg[f] = k
+                interp[f] = f not in (a, b)
+        if len(idx) == 1 and seg[lo] < 0:
+            track[lo] = box[0]; seg[lo] = k
+    return track, seg, interp
 
 
 # --------------------------------------------------------------------------------------
-# 3-4) Hız ve pas skoru
+# 3-4) Hız ve vuruş skoru
 # --------------------------------------------------------------------------------------
-def ball_velocity(track, motion):
+def ball_velocity(track, motion, seg=None):
     """Kamera hareketi çıkarılmış top hızı (N, 2). v[i] = i -> i+1 yer değiştirmesi; bilinmiyorsa nan."""
     n = len(track)
     v = np.full((n, 2), np.nan)
     for i in range(n - 1):
+        if seg is not None and seg[i] != seg[i + 1]:
+            continue
         p, q = track[i, :2], track[i + 1, :2]
         if np.isnan(p).any() or np.isnan(q).any():
             continue
-        A = motion[i + 1]
-        p_moved = A[:, :2] @ p + A[:, 2]     # kamera hareketiyle p'nin yeni kareye taşınmış hali
-        v[i] = q - p_moved
+        v[i] = q - _move(motion[i + 1], p)
     return v
 
 
@@ -204,13 +272,12 @@ def _near_player(ball_box, people, factor=0.35):
 
 
 def pass_scores(v, k=4):
-    """Kare başına pas skoru.
+    """Kare başına vuruş skoru.
 
-    vb, va: önceki / sonraki k karedeki MEDYAN hız vektörü.
-    skor = |va - vb| * |va| / (|va| + |vb|)  ->  hız vektöründe ani değişim VE sonrasında hızlı top.
-    Top durdurulduğunda (|va| küçük) skor düşer; yalnızca pas / şut / sektirme yüksek skor alır.
-    Ortalama yerine medyan: iz bir karede yanlış adaya atlarsa (top ekrandan çıkarken beyaz bir
-    ayakkabıya geçmek gibi) tek bir dev hız oluşur; medyan bunu yok sayar.
+    v1, v2: önceki / sonraki k karedeki MEDYAN hız vektörü.
+    skor = |v2 - v1| * |v2| / (|v2| + |v1|)  ->  hız vektöründe ani değişim VE sonrasında hızlı top.
+    Top durdurulduğunda (|v2| küçük) skor düşer; yalnızca pas / şut / sektirme yüksek skor alır.
+    Medyan, izin tek bir karede yanlış adaya atlamasını etkisiz bırakır.
     """
     n = len(v)
     s = np.zeros(n)
@@ -227,55 +294,114 @@ def pass_scores(v, k=4):
     return s
 
 
-def find_pass(scan, k=4, top_n=3, min_sep_s=0.6):
-    """scan_video çıktısından pas adaylarını bulur."""
+def _kick_in_gap(t, track, seg, interp, v, motion, k):
+    """Vuruş, topun görülmediği bir boşluğa denk geldiyse doğrusal doldurma vuruşu boşluğun başına çeker.
+    Bunun yerine, boşluktan sonraki gerçek hızla geriye gidilerek topun hareket etmeye başladığı kare
+    kestirilir: boşluk öncesi son konum (kamerayla taşınmış) ile boşluk sonrası ilk konum arasındaki
+    mesafe / vuruş sonrası hız = topun boşlukta hareket ettiği kare sayısı."""
+    n = len(track)
+    if not (0 <= t < n):
+        return t
+    if interp[t]:
+        b = t
+        while b > 0 and interp[b]:
+            b -= 1
+        a = t + 1
+        while a < n and interp[a]:
+            a += 1
+    elif t > 0 and interp[t - 1]:          # hızlanma, t'den hemen önceki boşlukta başlamış
+        a, b = t, t - 1
+        while b > 0 and interp[b]:
+            b -= 1
+    else:
+        return t
+    if a >= n or seg[a] != seg[b] or np.isnan(track[b, 0]) or np.isnan(track[a, 0]):
+        return t
+    after = [v[j] for j in range(a, min(n - 1, a + k)) if not interp[j] and not interp[j + 1] and not np.isnan(v[j, 0])]
+    if not after:
+        return t
+    va = float(np.hypot(*np.median(after, axis=0)))
+    before = [v[j] for j in range(max(0, b - k), b) if not interp[j] and not interp[j + 1] and not np.isnan(v[j, 0])]
+    vb = float(np.hypot(*np.median(before, axis=0))) if before else 0.0   # top sürme hızı (boşluktan önce)
+    if va - vb < 1e-6:
+        return t
+    p = track[b, :2].copy()
+    for f in range(b + 1, a + 1):
+        p = _move(motion[f], p)
+    d = float(np.hypot(*(track[a, :2] - p)))
+    # d = vb * (tk - b) + va * (a - tk)  ->  tk
+    tk = b + (va * (a - b) - d) / (va - vb)
+    return int(np.clip(round(tk), b, a))
+
+
+MIN_KICK = 1.5      # bundan düşük skor (px/kare @1280) vuruş sayılmaz: titreşim / yavaş top sürme
+STRONG = 0.3        # en güçlü vuruşun bu oranından güçlü olanlar "belirgin vuruş" sayılır
+
+
+def find_pass(scan, k=4, top_n=4, min_sep_s=0.6):
+    """scan_video çıktısından vuruşları bulur ve pası seçer."""
     frames = np.asarray(scan["frames"])
     w, h = scan["size"]
     stride = int(np.median(np.diff(frames))) if len(frames) > 1 else 1
-    track = build_track(scan["balls"], scan["size"], max_gap=max(2, 8 // stride))
-    v = ball_velocity(track, scan["motion"])
+    track, seg, interp = build_track(scan["balls"], scan["size"], scan["motion"], max_gap=max(2, 8 // stride),
+                                     step=stride)
+    v = ball_velocity(track, scan["motion"], seg)
     v_norm = v * (1280.0 / w) / stride                  # çözünürlük ve adımdan bağımsız: px/kare @1280
     speed = np.hypot(v_norm[:, 0], v_norm[:, 1])
     kk = max(2, k // stride)
     score = pass_scores(v_norm, kk)
     near = np.array([_near_player(track[i], scan["people"][i]) for i in range(len(frames))])
-    # Topun yakınında oyuncu yoksa (ör. sektirme, yanlış iz) skoru azalt
     near_any = np.array([near[max(0, i - kk):i + 1].any() for i in range(len(frames))])
-    score = score * np.where(near_any, 1.0, 0.4)
-    ball_ratio = float(np.mean([len(b) > 0 for b in scan["balls"]]))
+    score = score * np.where(near_any, 1.0, 0.4)        # topun yakınında oyuncu yoksa skoru azalt
+    ball_ratio = float(np.mean(~np.isnan(track[:, 0])))
 
-    cands, order = [], np.argsort(-score)
-    sep = max(1, int(min_sep_s * scan["fps"] / stride))
-    taken = []
-    for i in order:
-        if score[i] <= 0 or len(cands) >= top_n:
+    # Vuruş olayları (tepe noktaları, aralarında en az min_sep_s)
+    events, sep = [], max(1, int(min_sep_s * scan["fps"] / stride))
+    for i in np.argsort(-score):
+        if score[i] < MIN_KICK or len(events) >= top_n:
             break
-        if any(abs(i - j) < sep for j in taken):
+        if any(abs(i - j) < sep for j, _ in events):
             continue
-        taken.append(i)
-        # Tepe noktasından geriye doğru: topun hızlanmaya başladığı ilk kare = son temas karesi
-        after = np.nanmean(speed[i:i + kk]) if not np.isnan(speed[i:i + kk]).all() else 0
+        # Vuruş karesi: olay penceresinde topun vuruş sonrası hızına (S) ulaştığı İLK kare. Top sürme
+        # (oyuncuyla birlikte yavaş ilerleme) bu hıza ulaşmaz; böylece sürmenin başlangıcı değil,
+        # asıl vuruş seçilir. rm: 3 karelik ileriye dönük medyan hız (tek karelik sıçramaya dayanıklı).
+        lo_w, hi_w = max(0, i - kk), min(len(speed) - 1, i + sep)
+        rm = np.array([np.nanmedian(speed[j:j + 3]) if not np.isnan(speed[j:j + 3]).all() else np.nan
+                       for j in range(lo_w, hi_w + 1)])
         t = i
-        for j in range(i, max(-1, i - kk - 1), -1):
-            if not np.isnan(speed[j]) and speed[j] >= 0.5 * after:
-                t = j
-            else:
-                break
+        if not np.isnan(rm).all():
+            S = np.nanmax(rm)
+            ok = (np.nan_to_num(rm) >= 0.7 * S) & (np.nan_to_num(speed[lo_w:hi_w + 1]) >= 0.7 * S)
+            t = lo_w + int(np.argmax(ok)) if ok.any() else i
+        t = _kick_in_gap(t, track, seg, interp, v, scan["motion"], kk)
+        events.append((t, float(score[i])))
+
+    def cand(t, s, top):
         bb = track[t]
         ball_px = None if np.isnan(bb).any() else (float(bb[0]), float(bb[1] + bb[3] / 2))
         f = int(frames[t])
-        cands.append(PassCandidate(frame=f, time=f / scan["fps"], score=float(score[i]),
-                                   near_player=bool(near_any[t]), ball_px=ball_px))
-    if cands:
-        top = cands[0].score
-        for c in cands:
-            c.score = c.score / top if top > 0 else 0.0
+        return PassCandidate(frame=f, time=f / scan["fps"], score=s / top if top > 0 else 0.0,
+                             near_player=bool(near_any[t]), ball_px=ball_px)
+
+    reason, cands = "", []
+    if events:
+        top = max(s for _, s in events)
+        chrono = sorted(events)
+        strong = [e for e in chrono if e[1] >= STRONG * top]
+        if len(strong) >= 2:
+            chosen = strong[-2]
+            reason = (f"Videoda {len(strong)} belirgin vuruş bulundu. Son vuruş (kare {int(frames[strong[-1][0]])}) "
+                      "şut / bitiriş kabul edildi; ondan önceki vuruş pas olarak seçildi.")
+        else:
+            chosen = strong[0]
+            reason = "Videoda tek belirgin vuruş bulundu."
+        cands = [cand(*chosen, top)] + [cand(*e, top) for e in chrono if e != chosen]
     return PassResult(candidates=cands, fps=scan["fps"], n_frames=scan["n_frames"], ball_ratio=ball_ratio,
-                      frames=frames, speed=speed, score=score, ball=track[:, :2])
+                      frames=frames, speed=speed, score=score, ball=track[:, :2], reason=reason)
 
 
 def detect_pass(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None, refine=True):
-    """Tam akış. stride > 1 ise önce seyrek tarar, sonra en iyi adayın çevresini her karede yeniden tarar."""
+    """Tam akış. stride > 1 ise önce seyrek tarar, sonra seçilen pasın çevresini her karede yeniden tarar."""
     p1 = (lambda f: progress(0.7 * f)) if (progress and stride > 1 and refine) else progress
     scan = scan_video(video_path, model, stride=stride, imgsz=imgsz, conf=conf, progress=p1)
     res = find_pass(scan)
@@ -285,8 +411,10 @@ def detect_pass(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None
         p2 = (lambda f: progress(0.7 + 0.3 * f)) if progress else None
         fine = scan_video(video_path, model, stride=1, imgsz=imgsz, conf=conf, progress=p2,
                           frame_range=(c - win, c + win))
-        fres = find_pass(fine, top_n=1)
-        if fres.best is not None:
-            fres.best.score = 1.0
-            res.candidates[0] = fres.best
+        fres = find_pass(fine)
+        if fres.candidates:
+            near = min(fres.candidates, key=lambda x: abs(x.frame - c))
+            if abs(near.frame - c) <= 2 * stride:
+                near.score = res.best.score
+                res.candidates[0] = near
     return res
