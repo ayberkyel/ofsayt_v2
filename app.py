@@ -52,9 +52,29 @@ EXAMPLES = [   # 1. adımdaki "Örnek pozisyonlar" kartları
          desc="Geniş açı, kale sağda. Maçta ofsayt verilen pozisyon."),
     dict(title="CHE – BUR · tek kare", file=EXAMPLE_DIR / "che_bur.jpg", thumb=EXAMPLE_DIR / "che_bur.jpg",
          desc="Farklı kamera açısı, kale solda. Sistemin farklı açıda çalıştığını görmek için."),
+    # Aşağıdaki kliplerin videoları (*_video.mp4) yalnızca yerelde durur, GitHub'a konmaz. Video yoksa
+    # (ör. Streamlit Cloud) pas anındaki kare tek görsel olarak açılır.
+    dict(title="MUN – BOU", file=EXAMPLE_DIR / "mun_bou_video.mp4", thumb=EXAMPLE_DIR / "mun_bou.jpg",
+         desc="Kesintisiz geniş açılı atak; yayın pas anında görüntüyü donduruyor (3,4 sn)."),
+    dict(title="NEW – EVE", file=EXAMPLE_DIR / "new_eve_video.mp4", thumb=EXAMPLE_DIR / "new_eve.jpg",
+         desc="Kale solda, ceza sahası çizgileri net; yayın donması 2,2 sn'de."),
+    dict(title="HUL – IPS", file=EXAMPLE_DIR / "hul_ips_video.mp4", thumb=EXAMPLE_DIR / "hul_ips.jpg",
+         desc="Kale sağda, savunma hattı ceza sahası çizgisinde; yayın donması 3,2 sn'de."),
 ]
-# Ek örnekler (MUN–BOU, NEW–EVE, HUL–IPS): videoları (*_video.mp4, yalnızca yerelde, GitHub'a konmaz) ve
-# pas anı kareleri (*.jpg) examples/ içinde durur; sayfa kalabalık olmasın diye kart olarak gösterilmez. Dosya yolu alanından açılabilirler.
+
+
+def example_source(ex):
+    """Örneğin açılacak dosyası ve başlığı: video varsa video, yoksa pas anındaki kare (thumb)."""
+    if ex["file"].exists():
+        is_video = ex["file"].suffix.lower() in (".mp4", ".avi", ".mov", ".mkv", ".webm")
+        title = ex["title"] if " · " in ex["title"] else ex["title"] + (" · video" if is_video else " · tek kare")
+        return ex["file"], title
+    return ex["thumb"], ex["title"] + " · tek kare"
+
+
+st.set_page_config(page_title="Ofsayt Tespit Sistemi", page_icon=ui.logo_image(), layout="wide")
+# Tema renkleri .streamlit/config.toml'da; düğme, başlık, kart ve animasyon stilleri src/ui.py'de
+st.markdown(ui.CSS, unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------------------------
@@ -397,10 +417,10 @@ if step == STEPS[0]:
         per_row = 3
         for r0 in range(0, len(EXAMPLES), per_row):
             for col, ex in zip(st.columns(per_row), EXAMPLES[r0:r0 + per_row]):
-                src = ex["file"]
+                src, title = example_source(ex)
                 with col.container(border=True):
                     st.image(str(ex["thumb"]), width="stretch")
-                    st.markdown(f"**{ex['title']}**")
+                    st.markdown(f"**{title}**")
                     st.caption(ex["desc"])
                     st.button("Bu örneği aç", key=f"ex_{src.name}", width="stretch",
                               type="primary" if s.src_key == ("örnek", src.name) else "secondary",

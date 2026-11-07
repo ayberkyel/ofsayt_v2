@@ -19,6 +19,8 @@ def main():
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=120)
     at.run()
     assert not at.exception, at.exception
+    # Arayüz CSS'i (src/ui.py) sayfaya basılmalı; yoksa adım göstergesi, logo ve kartlar stilsiz görünür
+    assert any("<style>" in md.value and ".ot-steps" in md.value for md in at.markdown), "arayüz CSS'i yüklenmeli"
     frame = cv2.imdecode(np.fromfile(str(IMG), np.uint8), cv2.IMREAD_COLOR)
     at.session_state["frame"] = frame
     at.session_state["frame_name"] = IMG.stem
