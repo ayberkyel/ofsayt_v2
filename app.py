@@ -45,7 +45,6 @@ SCENES = ROOT / "scenes"
 TEAM_NAMES = {0: "Takım A", 1: "Takım B"}
 STEPS = ["1 · Kare seçimi", "2 · Top konumu", "3 · Oyuncu tespiti", "4 · Kalibrasyon", "5 · Sonuç"]
 EXAMPLE_DIR = ROOT / "examples"
-CLIP_DIR = EXAMPLE_DIR / "klipler"
 EXAMPLES = [   # 1. adımdaki "Örnek pozisyonlar" kartları
     dict(title="MUN – MCI · video", file=EXAMPLE_DIR / "mun_mci_video.mp4", thumb=EXAMPLE_DIR / "mun_mci_video_kapak.jpg",
          desc="10 sn'lik yayın klibi. “Pas adaylarını bul” ile otomatik pas tespitini deneyin (pas: 155. kare)."),
@@ -53,28 +52,9 @@ EXAMPLES = [   # 1. adımdaki "Örnek pozisyonlar" kartları
          desc="Geniş açı, kale sağda. Maçta ofsayt verilen pozisyon."),
     dict(title="CHE – BUR · tek kare", file=EXAMPLE_DIR / "che_bur.jpg", thumb=EXAMPLE_DIR / "che_bur.jpg",
          desc="Farklı kamera açısı, kale solda. Sistemin farklı açıda çalıştığını görmek için."),
-    # Aşağıdaki kliplerin videoları yalnızca yerelde (examples/klipler/, GitHub'a konmaz). Video yoksa
-    # (ör. Streamlit Cloud) pas anındaki kare tek görsel olarak açılır.
-    dict(title="MUN – BOU", file=CLIP_DIR / "mun_bou.mp4", thumb=EXAMPLE_DIR / "mun_bou.jpg",
-         desc="Kesintisiz geniş açılı atak; yayın pas anında görüntüyü donduruyor (3,4 sn)."),
-    dict(title="NEW – EVE", file=CLIP_DIR / "new_eve.mp4", thumb=EXAMPLE_DIR / "new_eve.jpg",
-         desc="Kale solda, ceza sahası çizgileri net; yayın donması 2,2 sn'de."),
-    dict(title="HUL – IPS", file=CLIP_DIR / "hul_ips.mp4", thumb=EXAMPLE_DIR / "hul_ips.jpg",
-         desc="Kale sağda, savunma hattı ceza sahası çizgisinde; yayın donması 3,2 sn'de."),
 ]
-
-
-def example_source(ex):
-    """Örneğin açılacak dosyası ve başlığı: video varsa video, yoksa pas anındaki kare (thumb)."""
-    if ex["file"].exists():
-        is_video = ex["file"].suffix.lower() in (".mp4", ".avi", ".mov", ".mkv", ".webm")
-        title = ex["title"] if " · " in ex["title"] else ex["title"] + (" · video" if is_video else " · tek kare")
-        return ex["file"], title
-    return ex["thumb"], ex["title"] + " · tek kare"
-
-st.set_page_config(page_title="Ofsayt Tespit Sistemi", page_icon=ui.logo_image(), layout="wide")
-# Tema renkleri .streamlit/config.toml'da; düğme, başlık, kart ve animasyon stilleri src/ui.py'de
-st.markdown(ui.CSS, unsafe_allow_html=True)
+# Ek örnekler (MUN–BOU, NEW–EVE, HUL–IPS): videoları (*_video.mp4, yalnızca yerelde, GitHub'a konmaz) ve
+# pas anı kareleri (*.jpg) examples/ içinde durur; sayfa kalabalık olmasın diye kart olarak gösterilmez. Dosya yolu alanından açılabilirler.
 
 
 # ------------------------------------------------------------------------------------
@@ -417,10 +397,10 @@ if step == STEPS[0]:
         per_row = 3
         for r0 in range(0, len(EXAMPLES), per_row):
             for col, ex in zip(st.columns(per_row), EXAMPLES[r0:r0 + per_row]):
-                src, title = example_source(ex)
+                src = ex["file"]
                 with col.container(border=True):
                     st.image(str(ex["thumb"]), width="stretch")
-                    st.markdown(f"**{title}**")
+                    st.markdown(f"**{ex['title']}**")
                     st.caption(ex["desc"])
                     st.button("Bu örneği aç", key=f"ex_{src.name}", width="stretch",
                               type="primary" if s.src_key == ("örnek", src.name) else "secondary",

@@ -60,8 +60,8 @@ ofsayt_v2/
 │   ├── test_core.py           Geometri + kural testleri (sentetik, bilinen cevaplı)
 │   ├── test_app.py            Arayüzün tüm adımlarının hatasız çalıştığı testi
 │   └── test_pass.py           Otomatik pas anı testi (sentetik video, bilinen pas karesi)
-├── examples/                  Arayüzdeki örnek pozisyonlar (MUN–MCI videosu; BRE–LIV, CHE–BUR, MUN–BOU, NEW–EVE, HUL–IPS kareleri)
-│   └── klipler/               MUN–BOU, NEW–EVE, HUL–IPS videoları (yalnızca yerelde, GitHub'a konmaz; yoksa kare açılır)
+├── examples/                  Arayüzdeki örnek pozisyonlar (MUN–MCI videosu, BRE–LIV ve CHE–BUR kareleri) ve ek
+│                              klipler: MUN–BOU, NEW–EVE, HUL–IPS pas anı kareleri + videoları (videolar yalnızca yerelde; kart olarak gösterilmez)
 ├── data/dataset/              (prepare_dataset.py üretir)
 ├── models/best.pt             (train.py kopyalar)
 ├── runs/                      (eğitim çıktıları, grafikler)
