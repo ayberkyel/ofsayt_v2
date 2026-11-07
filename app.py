@@ -374,6 +374,11 @@ st.markdown(ui.stepper(["Kare", "Top", "Oyuncular", "Kalibrasyon", "Karar"], STE
 # ------------------------------------------------------------------------------------
 if step == STEPS[0]:
     st.header("1 · Video yükle ve pas anını seç")
+    # Kalibrasyon (4. adım) ceza sahası / kale alanı çizgilerinin köşelerine dayanır; bunlar görünmezse
+    # piksel → metre dönüşümü kurulamaz.
+    st.warning("**Görüntüde ceza sahası görünmeli.** Kalibrasyon için ceza sahası ve kale alanı çizgilerinin "
+               "köşeleri gibi sahada yeri bilinen en az 4 nokta gerekir. Ceza sahasının görünmediği yakın çekim "
+               "veya orta saha görüntülerinde ofsayt çizgisi hesaplanamaz.", icon="⚠️")
 
     def open_source(path, key):
         """Yeni bir video / görseli açar ve önceki pozisyonun bütün durumunu sıfırlar."""
