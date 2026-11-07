@@ -61,7 +61,7 @@ ofsayt_v2/
 │   ├── test_app.py            Arayüzün tüm adımlarının hatasız çalıştığı testi
 │   └── test_pass.py           Otomatik pas anı testi (sentetik video, bilinen pas karesi)
 ├── examples/                  Arayüzdeki örnek pozisyonlar: MUN–MCI videosu, BRE–LIV ve CHE–BUR kareleri,
-│                              MUN–BOU, NEW–EVE, HUL–IPS (videoları yalnızca yerelde; yoksa pas anı karesi açılır)
+│                              MUN–BOU, NEW–EVE ve HUL–IPS videoları (+ pas anı kareleri)
 ├── data/dataset/              (prepare_dataset.py üretir)
 ├── models/best.pt             (train.py kopyalar)
 ├── runs/                      (eğitim çıktıları, grafikler)

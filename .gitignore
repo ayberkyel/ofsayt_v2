@@ -7,10 +7,6 @@ __pycache__/
 data/dataset/
 data/_extract/
 data/uploads/
-# Ek örnek klipler yalnızca yerelde (fotoğrafları depoda)
-examples/mun_bou_video.mp4
-examples/new_eve_video.mp4
-examples/hul_ips_video.mp4
 
 # Eğitim çıktıları ve otomatik indirilen ağırlıklar
 runs/

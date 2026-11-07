@@ -52,8 +52,7 @@ EXAMPLES = [   # 1. adımdaki "Örnek pozisyonlar" kartları
          desc="Geniş açı, kale sağda. Maçta ofsayt verilen pozisyon."),
     dict(title="CHE – BUR · tek kare", file=EXAMPLE_DIR / "che_bur.jpg", thumb=EXAMPLE_DIR / "che_bur.jpg",
          desc="Farklı kamera açısı, kale solda. Sistemin farklı açıda çalıştığını görmek için."),
-    # Aşağıdaki kliplerin videoları (*_video.mp4) yalnızca yerelde durur, GitHub'a konmaz. Video yoksa
-    # (ör. Streamlit Cloud) pas anındaki kare tek görsel olarak açılır.
+    # Video dosyası bulunamazsa pas anındaki kare tek görsel olarak açılır.
     dict(title="MUN – BOU", file=EXAMPLE_DIR / "mun_bou_video.mp4", thumb=EXAMPLE_DIR / "mun_bou.jpg",
          desc="Kesintisiz geniş açılı atak; yayın pas anında görüntüyü donduruyor (3,4 sn)."),
     dict(title="NEW – EVE", file=EXAMPLE_DIR / "new_eve_video.mp4", thumb=EXAMPLE_DIR / "new_eve.jpg",
