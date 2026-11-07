@@ -60,7 +60,8 @@ ofsayt_v2/
 │   ├── test_core.py           Geometri + kural testleri (sentetik, bilinen cevaplı)
 │   ├── test_app.py            Arayüzün tüm adımlarının hatasız çalıştığı testi
 │   └── test_pass.py           Otomatik pas anı testi (sentetik video, bilinen pas karesi)
-├── examples/                  Arayüzdeki örnek pozisyonlar (MUN–MCI videosu, BRE–LIV ve CHE–BUR kareleri)
+├── examples/                  Arayüzdeki örnek pozisyonlar (MUN–MCI videosu; BRE–LIV, CHE–BUR, MUN–BOU, NEW–EVE, HUL–IPS kareleri)
+│   └── klipler/               MUN–BOU, NEW–EVE, HUL–IPS videoları (yalnızca yerelde, GitHub'a konmaz; yoksa kare açılır)
 ├── data/dataset/              (prepare_dataset.py üretir)
 ├── models/best.pt             (train.py kopyalar)
 ├── runs/                      (eğitim çıktıları, grafikler)
@@ -253,7 +254,7 @@ Tarayıcıda `http://localhost:8501` açılır.
 
 | Adım | Yapılacak | Arka planda |
 |---|---|---|
-| 1 Kare | Video yükle (veya dosya yolunu yaz), **🤖 Pas anını bul** ile pas karesi otomatik bulunur ve video o karede kendiliğinden durur; gerekirse slider ve ±1 / ±10 ile düzelt | COCO YOLOv8 `sports ball` ile top izlenir, kamera hareketi optik akışla çıkarılır, topun hız vektörünün ani değiştiği ilk kare seçilir; top konumu 2. adıma otomatik aktarılır |
+| 1 Kare | Video yükle (veya dosya yolunu yaz), **🤖 Pas adaylarını bul** ile topun ayaktan ayrıldığı bütün anlar (ve yayıncının dondurduğu kare) bulunur, video her birinde durur; pas anını kullanıcı aday kartlarından seçer, gerekirse film şeridi ve ±1 / ±10 ile düzeltir | COCO YOLOv8 `sports ball` ile top izlenir, kamera hareketi optik akışla çıkarılır, topun hız vektörünün ani değiştiği ilk kare seçilir; top konumu 2. adıma otomatik aktarılır |
 | 2 Top | Topun yere değdiği noktaya tıkla | Ekran koordinatı orijinal çözünürlüğe ölçeklenir |
 | 3 Tespit | "Tespit et" → tabloyu kontrol et, yanlış takımı düzelt, yanlış tespiti "Yok say" yap, eksik oyuncuyu ekleme moduyla ekle | YOLOv8 + KMeans |
 | 4 Kalibrasyon | Önce kalenin görüntüde hangi tarafta olduğunu seç. Sağdaki şemada kırmızı halkayla gösterilen noktayı görüntüde bul ve tıkla; liste kendiliğinden sonraki noktaya geçer. 5-6 nokta. Sarı şablon gerçek çizgilerle örtüşmeli | `cv2.findHomography` (8'den az noktada tüm noktalarla en küçük kareler) + tutarlılık kontrolleri |

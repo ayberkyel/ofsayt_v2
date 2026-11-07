@@ -45,14 +45,32 @@ SCENES = ROOT / "scenes"
 TEAM_NAMES = {0: "Takım A", 1: "Takım B"}
 STEPS = ["1 · Kare seçimi", "2 · Top konumu", "3 · Oyuncu tespiti", "4 · Kalibrasyon", "5 · Sonuç"]
 EXAMPLE_DIR = ROOT / "examples"
+CLIP_DIR = EXAMPLE_DIR / "klipler"
 EXAMPLES = [   # 1. adımdaki "Örnek pozisyonlar" kartları
     dict(title="MUN – MCI · video", file=EXAMPLE_DIR / "mun_mci_video.mp4", thumb=EXAMPLE_DIR / "mun_mci_video_kapak.jpg",
-         desc="10 sn'lik yayın klibi. “Pas anını bul” ile otomatik pas tespitini deneyin (pas: 155. kare)."),
+         desc="10 sn'lik yayın klibi. “Pas adaylarını bul” ile otomatik pas tespitini deneyin (pas: 155. kare)."),
     dict(title="BRE – LIV · tek kare", file=EXAMPLE_DIR / "bre_liv.jpg", thumb=EXAMPLE_DIR / "bre_liv.jpg",
          desc="Geniş açı, kale sağda. Maçta ofsayt verilen pozisyon."),
     dict(title="CHE – BUR · tek kare", file=EXAMPLE_DIR / "che_bur.jpg", thumb=EXAMPLE_DIR / "che_bur.jpg",
          desc="Farklı kamera açısı, kale solda. Sistemin farklı açıda çalıştığını görmek için."),
+    # Aşağıdaki kliplerin videoları yalnızca yerelde (examples/klipler/, GitHub'a konmaz). Video yoksa
+    # (ör. Streamlit Cloud) pas anındaki kare tek görsel olarak açılır.
+    dict(title="MUN – BOU", file=CLIP_DIR / "mun_bou.mp4", thumb=EXAMPLE_DIR / "mun_bou.jpg",
+         desc="Kesintisiz geniş açılı atak; yayın pas anında görüntüyü donduruyor (3,4 sn)."),
+    dict(title="NEW – EVE", file=CLIP_DIR / "new_eve.mp4", thumb=EXAMPLE_DIR / "new_eve.jpg",
+         desc="Kale solda, ceza sahası çizgileri net; yayın donması 2,2 sn'de."),
+    dict(title="HUL – IPS", file=CLIP_DIR / "hul_ips.mp4", thumb=EXAMPLE_DIR / "hul_ips.jpg",
+         desc="Kale sağda, savunma hattı ceza sahası çizgisinde; yayın donması 3,2 sn'de."),
 ]
+
+
+def example_source(ex):
+    """Örneğin açılacak dosyası ve başlığı: video varsa video, yoksa pas anındaki kare (thumb)."""
+    if ex["file"].exists():
+        is_video = ex["file"].suffix.lower() in (".mp4", ".avi", ".mov", ".mkv", ".webm")
+        title = ex["title"] if " · " in ex["title"] else ex["title"] + (" · video" if is_video else " · tek kare")
+        return ex["file"], title
+    return ex["thumb"], ex["title"] + " · tek kare"
 
 st.set_page_config(page_title="Ofsayt Tespit Sistemi", page_icon=ui.logo_image(), layout="wide")
 # Tema renkleri .streamlit/config.toml'da; düğme, başlık, kart ve animasyon stilleri src/ui.py'de
@@ -85,8 +103,9 @@ def load_ball_model(name="yolov8s.pt"):
 MAX_INLINE_VIDEO = 40 * 1024 * 1024   # bundan büyük videolar tarayıcıya gömülmez
 
 
-def auto_stop_player(path, stop_t, fps, lead=3.0, height=440):
-    """Videoyu pas anından `lead` sn önce başlatır ve TAM pas karesinde kendiliğinden durdurur.
+def auto_stop_player(path, stops, fps, lead=3.0, height=470):
+    """Videoyu ilk adaydan `lead` sn önce başlatır ve her aday karede (topun ayaktan ayrıldığı her an)
+    kendiliğinden durur; "Sonraki aday" ile bir sonrakine kadar oynar. stops: [(t, etiket), ...] zaman sırasıyla.
 
     st.video'nun end_time'ı yalnızca tam saniye kabul eder ve ~0.25 sn geç durur; ofsayt için tek
     kare (40 ms) bile önemlidir. Bu yüzden küçük bir HTML oynatıcı kullanılır:
@@ -94,6 +113,8 @@ def auto_stop_player(path, stop_t, fps, lead=3.0, height=440):
     durdurulur ve currentTime tam pas karesine sabitlenir.
     """
     path = Path(path)
+    stops = sorted(stops)
+    stop_t = stops[0][0]
     if path.stat().st_size > MAX_INLINE_VIDEO:
         st.video(str(path), start_time=int(max(0, stop_t - lead)), end_time=int(np.ceil(stop_t)),
                  autoplay=True, muted=True)
@@ -110,6 +131,10 @@ def auto_stop_player(path, stop_t, fps, lead=3.0, height=440):
             border: none; border-radius: 999px; padding: 8px 18px;
             background: linear-gradient(135deg, #4A2A7A 0%, #6B3FA0 45%, #FF7EB6 100%);
             box-shadow: 0 4px 14px rgba(74, 42, 122, .25); }
+  #next { font-family: Poppins, sans-serif; font-weight: 600; font-size: 14px; color: #4A2A7A; cursor: pointer;
+          border: 1.5px solid #4A2A7A; border-radius: 999px; padding: 7px 16px; background: #FDF8F3; }
+  #next:hover { background: #FFD3E6; border-color: #FF7EB6; }
+  #next:disabled { opacity: .45; cursor: default; }
   #replay:hover { box-shadow: 0 6px 18px rgba(255, 126, 182, .45); }
   #rate { font-family: Poppins, sans-serif; border: 1.5px solid #4A2A7A; border-radius: 999px; padding: 3px 8px;
           background: #FDF8F3; color: #4A2A7A; }
@@ -119,37 +144,44 @@ def auto_stop_player(path, stop_t, fps, lead=3.0, height=440):
   <video id="v" style="width:100%;max-height:360px;background:#2E1A4F;border-radius:12px" muted playsinline controls
          src="data:__MIME__;base64,__B64__"></video>
   <div style="display:flex;gap:10px;align-items:center;margin-top:6px;font-size:14px">
-    <button id="replay">&#9654; Pas anına kadar oynat</button>
+    <button id="replay">&#9198; Baştan</button>
+    <button id="next">&#9654; Sonraki aday</button>
     <label>Hız <select id="rate"><option>0.25</option><option>0.5</option><option selected>1</option></select></label>
     <span id="msg"></span>
   </div>
 </div>
 <script>
 const v = document.getElementById('v'), msg = document.getElementById('msg');
-const STOP = __STOP__, START = __START__, HALF = 0.5 / __FPS__;
-let armed = true;
+const STOPS = __STOPS__, START = __START__, HALF = 0.5 / __FPS__;
+const nextBtn = document.getElementById('next');
+let k = 0, armed = true;
 function stopHere() {
-  v.pause(); v.currentTime = STOP; armed = false;
-  msg.textContent = '⏸ Pas anı: t = ' + STOP.toFixed(2) + ' s (otomatik durduruldu)';
+  const [t, label] = STOPS[k];
+  v.pause(); v.currentTime = t; armed = false;
+  msg.textContent = '⏸ Aday ' + (k + 1) + '/' + STOPS.length + ' · ' + label + ' — pas anı buysa aşağıdan seçin';
+  nextBtn.disabled = k >= STOPS.length - 1;
 }
 function check(now, meta) {
-  if (armed && meta.mediaTime >= STOP - HALF) stopHere();
+  if (armed && meta.mediaTime >= STOPS[k][0] - HALF) stopHere();
   if (armed) v.requestVideoFrameCallback(check);
 }
-function play() {
-  armed = true; msg.textContent = 'Oynatılıyor...';
+function run(from) {
+  armed = true; msg.textContent = 'Oynatılıyor... (sıradaki aday ' + (k + 1) + '/' + STOPS.length + ')';
   v.playbackRate = parseFloat(document.getElementById('rate').value);
-  v.currentTime = START;
+  if (from !== null) v.currentTime = from;
   if ('requestVideoFrameCallback' in v) v.requestVideoFrameCallback(check);
   v.play().catch(() => { msg.textContent = 'Oynatmak için düğmeye basın.'; });
 }
-v.addEventListener('timeupdate', () => { if (armed && v.currentTime >= STOP) stopHere(); });
-v.addEventListener('error', () => { msg.textContent = 'Tarayıcı bu video biçimini oynatamıyor (aşağıdaki kare yine doğrudur).'; });
-v.addEventListener('loadedmetadata', play, {once: true});
-document.getElementById('replay').onclick = play;
-document.getElementById('rate').onchange = play;
+function restart() { k = 0; nextBtn.disabled = false; run(START); }
+function next() { if (k < STOPS.length - 1) { k += 1; v.currentTime = STOPS[k - 1][0] + 2 * HALF; run(null); } }
+v.addEventListener('timeupdate', () => { if (armed && v.currentTime >= STOPS[k][0]) stopHere(); });
+v.addEventListener('error', () => { msg.textContent = 'Tarayıcı bu video biçimini oynatamıyor (aşağıdaki kareler yine doğrudur).'; });
+v.addEventListener('loadedmetadata', restart, {once: true});
+document.getElementById('replay').onclick = restart;
+nextBtn.onclick = next;
+document.getElementById('rate').onchange = () => { v.playbackRate = parseFloat(document.getElementById('rate').value); };
 </script>"""
-    html = (html.replace("__MIME__", mime).replace("__STOP__", f"{stop_t:.4f}")
+    html = (html.replace("__MIME__", mime).replace("__STOPS__", json.dumps([[round(t, 4), lab] for t, lab in stops]))
             .replace("__START__", f"{start:.4f}").replace("__FPS__", f"{fps:.3f}").replace("__B64__", b64))
     components.html(html, height=height)
 
@@ -382,14 +414,17 @@ if step == STEPS[0]:
     # ---- Örnek pozisyonlar: dosyası olmayan biri de sistemi hemen deneyebilsin ----
     with examples_box.expander("🎯 Örnek pozisyonlar — dosyanız yoksa buradan seçip deneyin",
                                expanded=not s.video_path):
-        for col, ex in zip(st.columns(len(EXAMPLES)), EXAMPLES):
-            with col.container(border=True):
-                st.image(str(ex["thumb"]), width="stretch")
-                st.markdown(f"**{ex['title']}**")
-                st.caption(ex["desc"])
-                st.button("Bu örneği aç", key=f"ex_{ex['file'].stem}", width="stretch",
-                          type="primary" if s.src_key == ("örnek", ex["file"].name) else "secondary",
-                          on_click=open_source, args=(ex["file"], ("örnek", ex["file"].name)))
+        per_row = 3
+        for r0 in range(0, len(EXAMPLES), per_row):
+            for col, ex in zip(st.columns(per_row), EXAMPLES[r0:r0 + per_row]):
+                src, title = example_source(ex)
+                with col.container(border=True):
+                    st.image(str(ex["thumb"]), width="stretch")
+                    st.markdown(f"**{title}**")
+                    st.caption(ex["desc"])
+                    st.button("Bu örneği aç", key=f"ex_{src.name}", width="stretch",
+                              type="primary" if s.src_key == ("örnek", src.name) else "secondary",
+                              on_click=open_source, args=(src, ("örnek", src.name)))
 
     if s.video_path and s.is_image:
         img = cv2.imdecode(np.fromfile(s.video_path, np.uint8), cv2.IMREAD_COLOR)
@@ -406,15 +441,15 @@ if step == STEPS[0]:
 
         # ---- Otomatik pas anı tespiti + pas anında kendiliğinden duran oynatıcı ----
         with st.container(border=True):
-            st.markdown("**🤖 Pas anını otomatik bul** — top izlenir, topun ayaktan ayrıldığı kare bulunur "
-                        "ve video o anda kendiliğinden durur.")
+            st.markdown("**🤖 Pas adaylarını bul** — top izlenir, topun ayaktan ayrıldığı her an bulunur; "
+                        "video her birinde durur ve pas anını siz seçersiniz.")
             a1, a2, a3 = st.columns([2, 2, 3])
             stride = a1.select_slider("Tarama adımı", [1, 2, 3, 4], value=2,
                                       format_func=lambda v: "her kare" if v == 1 else f"{v} karede bir",
                                       help="Seyrek tarama hızlıdır; bulunan adayın çevresi yine her karede taranır.")
             ball_sz = a2.select_slider("Top için model boyutu", [960, 1280], value=1280,
                                        help="Top küçük bir nesnedir; 1280 daha iyi bulur ama daha yavaştır.")
-            if a3.button("🤖 Pas anını bul", type="primary", width="stretch"):
+            if a3.button("🤖 Pas adaylarını bul", type="primary", width="stretch"):
                 anim = st.empty()
                 anim.markdown(ui.busy("Top izleniyor, pas anı aranıyor..."), unsafe_allow_html=True)
                 bar = st.progress(0.0, text="Video taranıyor (top + oyuncular)...")
@@ -428,34 +463,49 @@ if step == STEPS[0]:
                 bar.empty(); anim.empty()
                 if res is not None:
                     s.pass_res, s.pass_time = res, time.time() - t0
+                    s.pass_pick = None             # pası kullanıcı seçer; kaydırıcı öneriye gider
                     if res.best is not None:
-                        s.frame_idx = s.pass_pick = res.best.frame
+                        s.frame_idx = res.best.frame
                     st.rerun()
 
             res = s.get("pass_res")
             if res is not None:
                 if res.best is None:
-                    st.warning(f"Pas anı bulunamadı (top karelerin %{res.ball_ratio * 100:.0f} kadarında görüldü). "
-                               "Kareyi aşağıdaki kaydırıcıyla elle seçin.")
+                    st.warning(f"Topun ayaktan ayrıldığı an bulunamadı (top karelerin %{res.ball_ratio * 100:.0f} "
+                               "kadarında görüldü). Kareyi aşağıdaki kaydırıcıyla elle seçin.")
                 else:
-                    b = next((c for c in res.candidates if c.frame == s.get("pass_pick")), res.best)
-                    st.success(f"Pas anı: **kare {b.frame}** · t = {b.time:.2f} s  "
-                               f"(top karelerin %{res.ball_ratio * 100:.0f} kadarında görüldü · "
-                               f"{s.get('pass_time', 0):.0f} sn sürdü)")
-                    if res.ball_ratio < 0.3 or not b.near_player:
-                        st.warning("Güven düşük: top az görüldü veya pas anında bir oyuncunun ayağında değil. "
-                                   "Kareyi -1 / +1 ile kontrol edin.")
-                    if b is res.best and getattr(res, "reason", ""):
-                        st.caption("ℹ️ " + res.reason)
-                    auto_stop_player(s.video_path, (b.frame + 0.5) / info["fps"], info["fps"])
-                    if len(res.candidates) > 1:
-                        st.caption("Videodaki bütün vuruşlar (yanlış vuruş seçildiyse doğrusuna tıklayın):")
-                        events = sorted(res.candidates, key=lambda c: c.frame)
-                        for col, c in zip(st.columns(len(events)), events):
-                            mark = "✅ " if c.frame == b.frame else ""
-                            col.button(f"{mark}Kare {c.frame} · {c.time:.2f} s · güç {c.score:.2f}",
-                                       key=f"cand_{c.frame}", width="stretch", type="primary" if c.frame == b.frame else "secondary",
-                                       on_click=lambda f=c.frame: s.update(frame_idx=f, pass_pick=f))
+                    # Otomatik seçim her videoda doğru olmayabilir: bütün adaylar gösterilir, pası kullanıcı seçer.
+                    events = sorted(res.candidates, key=lambda c: c.frame)
+                    pick = s.get("pass_pick")
+                    st.success(f"Topun ayaktan ayrıldığı **{len(events)} an** bulundu "
+                               f"({s.get('pass_time', 0):.0f} sn sürdü). Video her birinde durur; "
+                               "**pas anı hangisiyse aşağıdan seçin.**")
+                    if res.ball_ratio < 0.3:
+                        st.warning(f"Top karelerin yalnızca %{res.ball_ratio * 100:.0f} kadarında görüldü; "
+                                   "bazı vuruşlar kaçmış olabilir. Gerekirse kareyi kaydırıcıyla seçin.")
+                    if getattr(res, "reason", ""):
+                        st.caption("⭐ Öneri: " + res.reason)
+                    fps = info["fps"]
+                    auto_stop_player(s.video_path, [((c.frame + 0.5) / fps, f"kare {c.frame} · {c.time:.2f} s"
+                                                     + (" · yayın donması" if getattr(c, "kind", "") == "donma" else ""))
+                                                    for c in events], fps)
+                    st.markdown("**Pas anını seçin** — topun pasörün ayağından ayrıldığı kare")
+                    per_row = 4
+                    for r0 in range(0, len(events), per_row):
+                        for col, c in zip(st.columns(per_row), events[r0:r0 + per_row]):
+                            with col.container(border=True):
+                                center = (int(c.ball_px[0]), int(c.ball_px[1])) if c.ball_px else None
+                                st.image(strip_thumb(s.video_path, c.frame, center), width="stretch")
+                                badge = "🧊 Yayın donması" if getattr(c, "kind", "") == "donma" else "⚽ Topa vuruş"
+                                star = " · ⭐ öneri" if c is res.best else ""
+                                st.caption(f"{badge}{star}  \nKare {c.frame} · {c.time:.2f} s")
+                                chosen = c.frame == pick
+                                st.button("✅ Seçildi" if chosen else "Pas anı bu", key=f"cand_{c.frame}",
+                                          width="stretch", type="primary" if chosen else "secondary",
+                                          on_click=lambda f=c.frame: s.update(frame_idx=f, pass_pick=f))
+                    if pick is None:
+                        st.info("Henüz seçim yapılmadı. Yukarıdaki adaylardan birini seçin; ardından aşağıdaki "
+                                "film şeridiyle ±1 kare düzeltip **✅ Pas anı bu kare** ile onaylayın.")
                     with st.expander("Top hızı / pas skoru grafiği"):
                         st.line_chart(pd.DataFrame({"top hızı (px/kare)": res.speed, "pas skoru": res.score},
                                                    index=res.frames))

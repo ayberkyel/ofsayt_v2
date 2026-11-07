@@ -42,6 +42,7 @@ class PassCandidate:
     score: float          # 0..1, en güçlü vuruşa göre normalize
     near_player: bool     # vuruş anında top bir oyuncunun ayağına yakın mı
     ball_px: tuple | None # o karedeki top konumu (zemin teması: kutunun alt orta noktası)
+    kind: str = "vuruş"   # "vuruş" (topun ayaktan ayrıldığı an) veya "donma" (yayıncının dondurduğu kare)
 
 
 @dataclass
@@ -384,7 +385,7 @@ MIN_KICK = 1.5      # bundan düşük skor (px/kare @1280) vuruş sayılmaz: tit
 STRONG = 0.3        # en güçlü vuruşun bu oranından güçlü olanlar "belirgin vuruş" sayılır
 
 
-def find_pass(scan, k=4, top_n=4, min_sep_s=0.6):
+def find_pass(scan, k=4, top_n=8, min_sep_s=0.6):
     """scan_video çıktısından vuruşları bulur ve pası seçer."""
     raw_freezes = find_freezes(scan)
     freezes = [(int(scan["frames"][a]), int(scan["frames"][b])) for a, b in raw_freezes]
@@ -434,15 +435,14 @@ def find_pass(scan, k=4, top_n=4, min_sep_s=0.6):
 
     reason, cands = "", []
     if freezes:
-        # Yayıncı görüntüyü dondurduysa: en uzun donmanın ilk karesi pas anıdır. Donmanın hemen
-        # ardından (0,6 sn içinde) bulunan vuruş aynı pasın kendisidir; listede tekrar gösterilmez.
+        # Yayıncı görüntüyü dondurduysa: en uzun donmanın ilk karesi önerilen pas anıdır.
         fa, fb = max(freezes, key=lambda ab: ab[1] - ab[0])
         ti = int(np.searchsorted(frames, fa))
         top = max([s for _, s in events], default=1.0)
-        win = int(0.6 * scan["fps"])
-        same = [e for e in events if fa - win <= int(frames[e[0]]) <= fb + win]
-        rest = [e for e in sorted(events) if e not in same]
+        # bütün vuruşlar aday olarak kalır; seçimi kullanıcı yapar (donma karesiyle aynı olan tekrarlanmaz)
+        rest = [e for e in sorted(events) if abs(int(frames[e[0]]) - fa) > 1]
         first = cand(ti, top, top)
+        first.kind = "donma"
         # Donmuş karede top çoğu zaman pasörün ayağında, oyuncuyla iç içedir ve model onu güvenilir
         # bulamaz (denemelerde krampon / saha kenarı nesneleri seçildi). Yanlış işaret yerine boş bırakılır;
         # top 2. adımda elle işaretlenir.

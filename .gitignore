@@ -7,6 +7,7 @@ __pycache__/
 data/dataset/
 data/_extract/
 data/uploads/
+examples/klipler/
 
 # Eğitim çıktıları ve otomatik indirilen ağırlıklar
 runs/
