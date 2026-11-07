@@ -19,6 +19,9 @@ Yöntem:
   5) Pas seçimi     : Ofsayt klibinde genellikle önce pas, sonra şut vardır. Birden çok güçlü vuruş
                       bulunursa SON vuruş şut kabul edilir ve ondan önceki vuruş pas olarak seçilir.
                       Bütün vuruşlar kullanıcıya listelenir.
+  6) Donmuş görüntü : Maç özetlerinde yayıncı, ofsayt pozisyonunu göstermek için görüntüyü pas anında
+                      1-2 saniye dondurur. Bu karelerde top hareketsiz göründüğü için hız hesabı bozulur;
+                      donmuş kareler hesaptan çıkarılır ve donmanın başladığı kare pas adayı olarak seçilir.
 """
 from dataclasses import dataclass, field
 
@@ -28,6 +31,8 @@ import numpy as np
 BALL_CLASS = 32      # COCO: sports ball
 PERSON_CLASS = 0     # COCO: person
 MIN_GREEN = 0.25     # top adayının çevresindeki en az çim oranı
+FREEZE_DIFF = 0.6    # ardışık kareler arası ortalama gri fark bundan küçükse görüntü donmuş sayılır (640 px)
+MIN_FREEZE_S = 0.3   # bundan kısa donmalar yok sayılır
 
 
 @dataclass
@@ -50,6 +55,7 @@ class PassResult:
     score: np.ndarray = field(repr=False)    # kare başına vuruş skoru
     ball: np.ndarray = field(repr=False)     # (N, 2) top merkezi, bilinmiyorsa nan
     reason: str = ""                          # seçimin açıklaması (arayüzde gösterilir)
+    freeze: tuple | None = None               # yayında görüntünün donduğu (ilk, son) kare, yoksa None
 
     @property
     def best(self):
@@ -104,7 +110,7 @@ def scan_video(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None,
     lo, hi = max(0, int(lo)), min(n - 1, int(hi))
     cap.set(cv2.CAP_PROP_POS_FRAMES, lo)
 
-    out = dict(frames=[], balls=[], people=[], motion=[], fps=fps, n_frames=n, size=None)
+    out = dict(frames=[], balls=[], people=[], motion=[], diff=[], fps=fps, n_frames=n, size=None)
     prev_gray, small_w = None, 640
     idx = lo
     total = (hi - lo) // stride + 1
@@ -119,6 +125,7 @@ def scan_video(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None,
             gray = cv2.cvtColor(cv2.resize(frame, (small_w, int(h * sc))), cv2.COLOR_BGR2GRAY)
             A = _camera_motion(prev_gray, gray)
             A = A.copy(); A[:, 2] /= sc          # ötelemeyi tam çözünürlüğe çevir
+            diff = np.inf if prev_gray is None else float(cv2.absdiff(gray, prev_gray).mean())
             prev_gray = gray
 
             res = model.predict(frame, imgsz=imgsz, conf=conf, classes=[PERSON_CLASS, BALL_CLASS],
@@ -135,13 +142,52 @@ def scan_video(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None,
                 elif float(b.conf) >= 0.25:
                     people.append((x1, y1, x2, y2))
             out["frames"].append(idx); out["balls"].append(balls)
-            out["people"].append(people); out["motion"].append(A)
+            out["people"].append(people); out["motion"].append(A); out["diff"].append(diff)
             if progress:
                 progress(len(out["frames"]) / max(total, 1))
         idx += 1
     cap.release()
     if not out["frames"]:
         raise IOError("Videodan kare okunamadı.")
+    return out
+
+
+def find_freezes(scan):
+    """Donmuş görüntü aralıkları: [(ilk_i, son_i), ...] (scan indeksleri). ilk_i, donmuş görüntünün
+    kendisidir (öncesinden farklı son kare); sonraki kareler onun kopyasıdır."""
+    diff = np.asarray(scan.get("diff", []), float)
+    if len(diff) == 0:
+        return []
+    frames = np.asarray(scan["frames"])
+    stride = int(np.median(np.diff(frames))) if len(frames) > 1 else 1
+    min_len = max(2, int(round(MIN_FREEZE_S * scan["fps"] / stride)))
+    still = diff < FREEZE_DIFF
+    out, i = [], 0
+    while i < len(still):
+        if still[i]:
+            j = i
+            while j + 1 < len(still) and still[j + 1]:
+                j += 1
+            if j - i + 1 >= min_len:
+                out.append((max(0, i - 1), j))
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def drop_frozen(scan, freezes):
+    """Donmuş kopyaları taramadan çıkarır (donmuş görüntünün ilk karesi kalır). Kopyalarda kamera hareketi
+    birimdir; çıkarınca donma öncesi ve sonrası kareler hız hesabında ardışık olur."""
+    if not freezes:
+        return scan
+    keep = np.ones(len(scan["frames"]), bool)
+    for a, b in freezes:
+        keep[a + 1:b + 1] = False
+    out = dict(scan)
+    for key in ("frames", "balls", "people", "motion", "diff"):
+        if key in scan:
+            out[key] = [x for x, k in zip(scan[key], keep) if k]
     return out
 
 
@@ -340,6 +386,9 @@ STRONG = 0.3        # en güçlü vuruşun bu oranından güçlü olanlar "belir
 
 def find_pass(scan, k=4, top_n=4, min_sep_s=0.6):
     """scan_video çıktısından vuruşları bulur ve pası seçer."""
+    raw_freezes = find_freezes(scan)
+    freezes = [(int(scan["frames"][a]), int(scan["frames"][b])) for a, b in raw_freezes]
+    scan = drop_frozen(scan, raw_freezes)
     frames = np.asarray(scan["frames"])
     w, h = scan["size"]
     stride = int(np.median(np.diff(frames))) if len(frames) > 1 else 1
@@ -384,6 +433,28 @@ def find_pass(scan, k=4, top_n=4, min_sep_s=0.6):
                              near_player=bool(near_any[t]), ball_px=ball_px)
 
     reason, cands = "", []
+    if freezes:
+        # Yayıncı görüntüyü dondurduysa: en uzun donmanın ilk karesi pas anıdır. Donmanın hemen
+        # ardından (0,6 sn içinde) bulunan vuruş aynı pasın kendisidir; listede tekrar gösterilmez.
+        fa, fb = max(freezes, key=lambda ab: ab[1] - ab[0])
+        ti = int(np.searchsorted(frames, fa))
+        top = max([s for _, s in events], default=1.0)
+        win = int(0.6 * scan["fps"])
+        same = [e for e in events if fa - win <= int(frames[e[0]]) <= fb + win]
+        rest = [e for e in sorted(events) if e not in same]
+        first = cand(ti, top, top)
+        # Donmuş karede top çoğu zaman pasörün ayağında, oyuncuyla iç içedir ve model onu güvenilir
+        # bulamaz (denemelerde krampon / saha kenarı nesneleri seçildi). Yanlış işaret yerine boş bırakılır;
+        # top 2. adımda elle işaretlenir.
+        first.ball_px = None
+        cands = [first] + [cand(*e, top) for e in rest]
+        reason = (f"Yayında görüntü {fa / scan['fps']:.1f}–{fb / scan['fps']:.1f}. saniyeler arasında "
+                  f"donduruluyor ({(fb - fa) / scan['fps']:.1f} sn). "
+                  "Maç özetlerinde ofsayt pozisyonu genellikle pas anında dondurularak gösterilir; "
+                  "donmanın başladığı kare pas anı olarak seçildi.")
+        return PassResult(candidates=cands, fps=scan["fps"], n_frames=scan["n_frames"], ball_ratio=ball_ratio,
+                          frames=frames, speed=speed, score=score, ball=track[:, :2], reason=reason,
+                          freeze=(fa, fb))
     if events:
         top = max(s for _, s in events)
         chrono = sorted(events)
@@ -405,7 +476,8 @@ def detect_pass(video_path, model, stride=1, imgsz=960, conf=0.05, progress=None
     p1 = (lambda f: progress(0.7 * f)) if (progress and stride > 1 and refine) else progress
     scan = scan_video(video_path, model, stride=stride, imgsz=imgsz, conf=conf, progress=p1)
     res = find_pass(scan)
-    if stride > 1 and refine and res.best is not None:
+    # Donmuş görüntüden seçilen kare zaten kesindir (donmuş kopyalar özdeştir); yeniden taramaya gerek yok.
+    if stride > 1 and refine and res.best is not None and res.freeze is None:
         c = res.best.frame
         win = int(1.0 * scan["fps"])
         p2 = (lambda f: progress(0.7 + 0.3 * f)) if progress else None

@@ -24,7 +24,11 @@ PASS_FRAME = 60       # son temas karesi: top bu kareden sonraki karede ayaktan 
 PAN = 4.0             # kamera kayması, px/kare
 
 
-def make_video(path):
+FREEZE = 40           # maç özetlerindeki gibi pas anında görüntünün donduğu kare sayısı
+
+
+def make_video(path, freeze=0):
+    """freeze > 0 ise PASS_FRAME karesi freeze kez tekrar yazılır (yayıncının pas anında dondurması)."""
     rng = np.random.default_rng(0)
     world = cv2.GaussianBlur((rng.random((H, W * 3)) * 255).astype(np.uint8), (0, 0), 3)
     world = cv2.cvtColor(cv2.merge([world // 3, world // 2 + 60, world // 3]), cv2.COLOR_BGR2BGR555)
@@ -43,6 +47,9 @@ def make_video(path):
         cv2.rectangle(img, (sx - 15, 300), (sx + 15, 405), (0, 0, 255), -1)
         cv2.circle(img, (int(bx - cam), int(by)), 7, (255, 255, 255), -1)
         vw.write(img)
+        if i == PASS_FRAME:
+            for _ in range(freeze):
+                vw.write(img)
     vw.release()
 
 
@@ -76,6 +83,16 @@ def main():
             assert abs(err) <= 1, f"pas karesi hatalı: {best.frame}"
             assert best.near_player
             assert best.ball_px is not None
+
+        # Donmuş görüntü: pas karesi 40 kare (1,6 sn) tekrar ediyor; donmanın ilk karesi seçilmeli
+        path = Path(d) / "donmus.mp4"
+        make_video(path, freeze=FREEZE)
+        for stride in (1, 2):
+            res = detect_pass(path, FakeModel(), stride=stride)
+            print(f"  donmuş görüntü, stride={stride}: bulunan kare {res.best.frame} (gerçek {PASS_FRAME}), "
+                  f"donma {res.freeze}")
+            assert res.freeze is not None, "donma bulunamadı"
+            assert abs(res.best.frame - PASS_FRAME) <= stride, f"donmuş pas karesi hatalı: {res.best.frame}"
     print("test_pass: OK")
 
 
